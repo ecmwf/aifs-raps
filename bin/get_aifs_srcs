@@ -52,13 +52,14 @@ function get_src {
 SRC_DIR=$RAPS_AIFS_BUILD_DIR/sources
 mkdir -p $SRC_DIR
 ver_echo "cloning repos into $SRC_DIR"
-anemoi_training_branch='itt380'
-anemoi_models_branch='itt380'
+anemoi_core_branch="aifs-raps_20251031"
+anemoi_training_branch=$anemoi_core_branch
+anemoi_models_branch=$anemoi_core_branch
 get_anemoi_core=0
 if [[ $anemoi_training_branch == $anemoi_models_branch ]]; then
 	get_anemoi_core=1
 fi
-anemoi_inference_branch='feature/parallelOutput'
+anemoi_inference_branch=$anemoi_core_branch
 
 anemoi_training_src_dir=$SRC_DIR/anemoi-training
 anemoi_models_src_dir=$SRC_DIR/anemoi-models
