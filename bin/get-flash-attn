@@ -1,0 +1,302 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# This program reads info about your install and tries to find a matching flash attn wheel from
+# https://github.com/Dao-AILab/flash-attention/releases
+
+# An example wheel: flash_attn-2.7.0.post1+cu12torch2.5cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+
+# For this we need to know
+#       Cuda version
+#       torch version
+#       cxx abi TRUE/FALSE
+#       python version
+#       OS (assume linux)
+#       ISA
+
+
+# the next hundred lines are all just parsing command line args :D
+
+wheel_source="all" # -s|--source #Where to fetch the wheels from. valid options are "all;tridao;naco". "all" will select provider dynamically based on versions
+get_wheel_flag=0 # --get-wheel # if you just want the wheel
+list_wheels_flag=0 # -l|--list-wheels|--list # lists available wheels
+uv_flag=0 # --uv #if you want to install with uv
+offline_flag=0 # --offline #if you want to do an offline install (download wheel and quit)
+dryrun_flag=0 # --dryrun #if you want to dryrun
+force_reinstall_flag=0 # --force-reinstall # if you want to force reinstallation
+flash_attn_version='' # -v|--flash-attn-version VERSION #version to install, by default installs the newest
+verbose_flag=0 # --verbose #to set +x
+
+#colon after for an arg
+lkey="uv offline dryrun force-reinstall flash-attn-version: verbose get-wheel source: list-wheels list"
+rkey=$(echo $lkey | perl -pe 's/-//g')
+
+LONG_FLAGS=""
+for lf in $(echo "$lkey $rkey" | perl -pe 's/\s+/\n/g'| sort -u)
+do
+    LONG_FLAGS="$LONG_FLAGS -l $lf"
+done
+
+FLAGS="v:s:l"
+
+OPTS=`getopt -o $FLAGS $LONG_FLAGS -- "$@"`
+
+if [[ $? -ne 0 ]] ; then
+    echo "${cmd}: (Error) Invalid or unsupported options from 'getopt'" >&2
+    exit 1
+fi
+
+trueargs=$(echo "$OPTS" | perl -pe "s/^\s+//; s/(--\S+)\s+'/\${1}=/g; s/'//g; s/--\s*$//")
+abort=no
+
+eval set -- "$OPTS"
+
+while true
+do
+    case "$1" in
+    -v|--flash-attn-version) flash_attn_version=$2; shift 2;;
+    -s|--source) wheel_source=$2; shift 2;;
+    --uv) uv_flag=1; shift;;
+    --dryrun) dryrun_flag=1; shift;;
+    --offline) offline_flag=1; shift;;
+    --verbose) verbose_flag=1; shift;;
+    --get-wheel) get_wheel_flag=1; shift;;
+    -l|--list|--list-wheels) list_wheels_flag=1; shift;;
+    --force-reinstall) force_reinstall_flag=1; shift;;
+        --) shift; break;;
+        *) echo "DEBUG: 1=${1:-}"; echo "DEBUG: 2=${2:-}"; abort=yes; break;;
+    esac
+done
+
+if [[ $abort = yes ]] ; then
+    echo "${cmd}: (Error) Invalid command line arguments : $cmdargs" >&2
+    ((errcnt += 1))
+fi
+
+quiet="-q" #by default pip and wget is silenced
+if [[ $verbose_flag -eq 1 ]]; then
+	set -x
+	quiet="" #unsilence pip and wget when running in verbose mode
+fi
+
+if command -v python3 &> /dev/null; then 
+	PYTHON_CMD="python3" 
+else 
+	PYTHON_CMD="python" 
+fi
+
+printf "importing torch to parse config. could take a min...\n"
+torch_config=`$PYTHON_CMD -c "import torch; print(torch.__config__.show())"` ||{
+        printf "Error. could not import torch config. maybe torch can't be found? Have you activated your python evironment?\nexiting..."
+        exit 1
+}
+
+# cut off everything up to and inc "CUDA_VERSION="      -> 12.4,CUDNN_VERSION=...
+# takes up to the first '.'                             -> 12
+cuda_version=`echo ${torch_config#*CUDA_VERSION=} | awk -F'.' '{print $1}'`
+printf " +        cu$cuda_version\n"
+
+# cut off everything up to and inc "TORCH_VERSION="             -> 2.5.1, USE_CUDA=ON, USE_CUDNN=ON,
+# split along '.', take the 1st and 2nd match and add a '.'     -> 2.5
+torch_version=`echo ${torch_config#*TORCH_VERSION=} | awk -F'.' '{print $1 "." $2 }'`
+printf " +        torch v$torch_version\n"
+
+# cut off everything up to and inc "ABI="
+# then read the first char
+ABI=`echo ${torch_config#*ABI=} | awk '{print substr ($0, 0, 1)}'`  # 0 or 1
+if [[ ! $ABI -eq 0 ]] && [[ ! $ABI -eq 1 ]]; then
+        printf "Error! ABI=$ABI, only '0' or '1' is valid. exiting...\n"
+        exit 1
+fi
+#convert from 0/1 to TRUE/FALSE for whl name later
+if [[ $ABI -eq 0 ]]; then
+        ABI="FALSE"
+else
+        ABI="TRUE"
+fi
+printf " +        ABI$ABI\n"
+
+# python version
+# python3 --version                     -> Python 3.11.10
+# cuts along ' ', takes the 2nd match   -> 3.11.10
+# cuts along '.', takes the 2nd match   -> 11
+python_version=`$PYTHON_CMD --version | awk -F' ' '{print $2}' | awk -F'.' '{print $2}'`
+printf " +        cp${python_version}\n"
+
+# OS
+# Assume Linux. Always assume Linux
+os="linux"
+printf " +        $os\n"
+
+# ISA
+if  command -v lscpu 2>&1 >/dev/null; then
+        isa=`lscpu | grep "^Architecture:" | awk '{print $2}'`
+fi
+printf " +        $isa\n"
+
+#check for internet
+# if no, just run offline mode
+wget $quiet --spider http://google.com
+if [ ! $? -eq 0 ]; then
+        printf "Warning! no internet detected (unable to ping 'http://google.com')\nRunning in offline mode instead\n"
+        offline_flag=1
+fi
+
+
+#select source, if source is all
+# aarch64 will go to naco
+# and any torch builds newer then 2.6.0
+if  [[ $wheel_source == "all" ]]; then
+wheel_source="tridao"
+if  [[ $isa == "aarch64" ]] || [ `echo $torch_version'>'2.6 | bc -l` -eq 1 ] ; then
+wheel_source="naco"
+fi
+printf " +        source '$wheel_source'\n"
+fi
+
+if [[ $wheel_source == "naco" ]]; then
+
+	#Hardcode abi false, I dont have wheels with ABI true yet
+	ABI=FALSE
+	tag="v0.1-alpha"
+#https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.7.4+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
+	repo=cathalobrien/get-flash-attn
+
+elif  [[ $wheel_source == "tridao" ]]; then
+
+	tag=v${flash_attn_version}
+	repo=Dao-AILab/flash-attention
+
+else
+printf "Unkown wheel source '$wheel_source'. Exiting...\n"
+exit 0
+fi
+
+#if a version was not given with '-v <version>'
+#try to find the newest match for your given env
+if [[ ${flash_attn_version} == "" ]]; then
+	wheels=`curl -s -L "https://api.github.com/repos/${repo}/releases" | jq -r ".[].assets[].name" | grep  "torch${torch_version}cxx11abi${ABI}-cp3${python_version}"`
+	num_wheels=$(echo "$wheels" | wc -l)
+	if [[ $num_wheels -eq 0 ]]; then
+		printf "\nError no matching wheel found for your environment\n.run './get-flash-attn -l | ./etc/show_wheel_availability.awk' to show available wheels. Exiting..."
+		exit 0
+	fi
+	#assumes newest versions are at the bottom
+	# TODO should not automatically pick v3 wheels
+	flash_attn_wheel=$(echo "$wheels" | tail -n 1)
+
+	#get the version from the wheel
+	# we need it for the tag in the case of tridao, adn to import to test the install at the end
+	tmp="${flash_attn_wheel#*flash_attn-}" # Remove prefix "flash_attn-"
+	flash_attn_version="${tmp%%+*}" # Remove suffix starting with "+"
+
+	if [[ $wheel_source == "tridao" ]]; then
+		 tag=v${flash_attn_version}
+	fi
+else
+	#trust that a valid version was given, we will find out soon enough
+	flash_attn_wheel="flash_attn-${flash_attn_version}+cu${cuda_version}torch${torch_version}cxx11abi${ABI}-cp3${python_version}-cp3${python_version}-${os}_${isa}.whl"
+fi
+
+url="https://github.com/${repo}/releases/download/$tag/$flash_attn_wheel"
+if [[ $list_wheels_flag -eq 1 ]]; then
+	if [[ $offline_flah -eq 1 ]]; then
+		printf "\ncant list available wheels without internet. exiting..."
+		exit 0
+	fi
+	printf "\nThe following wheels are available from the source '$wheel_source':\n"
+ 	curl -s -L "https://api.github.com/repos/${repo}/releases" | jq -r '.[].assets[].name'
+	exit 0
+fi
+
+printf " =>       $flash_attn_wheel\n"
+
+if [[ "$DRYRUN" -eq "1" ]]  || [[ $dryrun_flag -eq "1" ]] ; then
+        printf "\nDryrun! Printing commands instead:\n"
+	printf "         wget $url\n"
+	printf "         pip install $flash_attn_wheel\n"
+	exit 0
+fi
+
+if [[ "$OFFLINE" -eq 1 ]] || [[ "$offline_flag" -eq 1 ]]; then
+        printf "\nOffline! To install flash-attn, please run 'wget ...' on a system with internet and copy it over and then run 'pip install':\n"
+        printf "          wget $url\n"
+        printf "          scp $flash_attn_wheel <remote>:\n"
+	printf "	  ssh <remote>\n"
+        printf "          pip install $flash_attn_wheel\n"
+	exit 0
+fi
+
+printf "\nRetrieving $flash_attn_wheel...\n"
+if [[ ! $url == "" ]]; then 
+wget $quiet $url 2>&1 > /dev/null ||{
+	printf "url not found! Maybe '$flash_attn_wheel' is not a supported configuration :(\nrun './get-flash-attn -l | ./etc/show_wheel_availability.awk' to show available wheels\nexiting...\n"
+	exit 0
+}
+fi
+
+if [[ $get_wheel_flag -eq 1 ]]; then
+	printf "Wheel is saved at $PWD/$flash_attn_wheel\n"
+	exit 0
+fi
+
+prefix=""
+#first case is legacy, 2nd case is command line arg
+if [[ ! $UV == "" ]] || [[ $uv_flag -eq "1" ]] ; then
+	prefix="uv"
+fi
+
+reinstall=""
+if [[ $force_reinstall_flag -eq 1 ]]; then
+	reinstall="--force-reinstall"
+fi
+printf "Installing $flash_attn_wheel...\n"
+$prefix pip install $quiet $reinstall --no-cache-dir --no-deps $flash_attn_wheel
+rm $flash_attn_wheel
+
+# [_-] because the module name is not consistent
+pip list | grep flash[_-]attn > /dev/null  2>get-flash-attn.err
+install_status=$?
+if [[ $install_status == "0" ]]; then
+	printf "Install succeeded\n"
+else
+	printf "Install failed. Your error is saved in 'get-flash-attn.err'\n"
+	exit 0 
+fi
+
+if [[ $wheel_source == "tridao" ]] && [ `echo $torch_version'>'2.6 | bc -l` -eq 1 ] ; then
+	printf "\nWarning. torch version '$torch_version' is 2.7 or higher. Due to changes in how the wheels are built, you might need to update your GCC for flash-attn before running\n"
+	printf "On Atos: 		'export LD_LIBRARY_PATH=/usr/local/apps/gcc/12.2.0/lib64/:\$LD_LIBRARY_PATH'\n"
+	printf "On Leonardo: 	'module load gcc/12.2.0'\n"
+fi
+
+printf "\nTesting flash attention install by importing it.\n"
+flash_attn_major_version=${flash_attn_version:0:1} #first letter, either 2 or 3
+
+if [[ $flash_attn_major_version -eq 2 ]]; then
+	import_cmd="import flash_attn"
+elif [[ $flash_attn_major_version -eq 3 ]]; then
+	import_cmd="import flash_attn_interface"
+else
+	printf "Unknown python major version '$flash_attn_major_version'. Can't test installation by importing. exiting...\n"
+	exit 0
+
+fi
+
+#need the nasty double quots here because of the space in import_cmd
+python -c "'$import_cmd'" 2>get-flash-attn.err
+import_status=$? 
+
+if [[ $import_status == "0" ]]; then
+	printf "Import succeeded\n"
+else
+	printf "Import failed. Your error is saved in 'get-flash-attn.err'\n"
+	exit 0
+fi

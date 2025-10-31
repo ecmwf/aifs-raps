@@ -1,0 +1,38 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Read from stdin into a variable
+input=$(cat)
+
+# Use awk to:
+# - Skip the header (NR > 1)
+# - Track min and max values for StartTime (field 24) and EndTime (field 25)
+# - Count lines
+awk -F',' 'NR > 1 {
+    if (! $24 == "") start = $24 + 0
+    if (! $25 == "") end = $25 + 0
+    if (min_start == "" || start < min_start) min_start = start
+    if (max_end == "" || end > max_end) max_end = end
+    exp_count++
+}
+END {
+    if (min_start == "" || max_end == "") {
+	printf "Error. No invalid timing data.\n"
+	exit 0
+    }
+    else {
+    printf "Experiment count: %d\n", exp_count
+    elapsed_time =  max_end - min_start
+    elapsed_time_hr = elapsed_time / 60 / 60
+    printf "Elapsed time: %.2f hours\n", elapsed_time_hr
+    throughput= exp_count / elapsed_time_hr
+    printf "throughput: %.4f experiments per hour\n", throughput
+    }
+}' <<< "$input"

@@ -1,0 +1,42 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+---
+### RAPS AIFS bundle
+
+name    : raps-aifs-bundle
+version : 1
+cmake   : >
+    INSTALL_LIB_DIR=lib
+    ECBUILD_INSTALL_LIBRARY_HEADERS=ON
+    ECBUILD_INSTALL_FORTRAN_MODULES=ON
+
+projects :
+
+    - ecbuild :
+        git     : ${GITHUB}/ecmwf/ecbuild
+        version : 3.9.1
+        bundle  : false
+
+    - aec :
+        git     : https://gitlab.dkrz.de/k202009/libaec
+        version : v1.1.3
+        bundle  : false
+
+    - eccodes :
+        git     : ${GITHUB}/ecmwf/eccodes
+        version : 2.38.3
+        cmake   : >
+            ENABLE_ECCODES_THREADS=ON
+            ECCODES_ENABLE_NETCDF=OFF
+            ECCODES_ENABLE_FORTRAN=ON
+            ECCODES_ENABLE_MEMFS=ON
+            ECCODES_INSTALL_EXTRA_TOOLS=ON
+            ECCODES_ENABLE_AEC=ON
+            ECCODES_ENABLE_JPG_LIBOPENJPEG=OFF

@@ -1,0 +1,580 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+#
+# Batch system independent script to run ECMWFs AIFS model
+#
+# Author: Cathal O'Brien (ECMWF) 13-Nov-2024 : Initial version
+
+set +x
+set -eua
+shopt -s extglob # enables extglob i.e. @(x|y|z) regular expressions in bash
+
+bashsrc=$(basename ${BASH_SOURCE})
+
+function ver_echo
+{
+    if [[ $verbose -eq 1 ]] ; then
+        echo "$@"
+    fi
+}
+
+if [[ $BASH_VERSINFO -lt 4 ]] ; then
+    PS4='+ [${bashsrc}:${LINENO}]: '
+else # only v4 onwards supports the below one w/o silent deaths
+    _tref=$(date +%s)
+    PS4='+ [${bashsrc}:$(($(date +%s)-_tref))s:$(date +%T):${LINENO}]: '
+fi
+
+function preserve
+{
+    args=""
+    for x in "$@"
+    do
+	args="${args} $x"
+    done
+    echo $args
+    unset args x
+}
+
+t1=$(date +%s.%N)
+started=$(date -R) # must be with -R or date --date="$started" in jobinfo may occasionally fail
+
+errcnt=0
+launcher=${launcher:-""}
+
+cmddir=$(dirname $(which $0))
+cmd=$(basename $0)
+cmdargs=${*:-}
+
+pid=$$
+
+# Usage: model
+batch_size=0		# -B|--batch-size <batch size> #defaults to 1
+batch_limit_train=0 # --train-batch-limit <limit> #max number of train batches per epoch
+batch_limit_val=0 # --val-batch-limit <limit> #max number of val batches per epoch
+dataset=""          # -d <filename>     # Filename of input zarr dataset
+device="gpu"		# -D <device> 	# Device to run on, default 'gpu'
+dryrun=0            # --dryrun          # just prints run config and quits
+ens_size=0		# -E|--ens|--ensemble-size <ens size>
+hydra_args=""		# --hydra-args <hydra args> #pass hydra overrides like "model=.. hardware.num_nodes=..."
+hidden_res=""		# -h|--hidden-res <hidden res> #default o96 for transformer, 6 for gnn/gt
+interactive=0 		# --intractive # runs interactively by setting launcher to ""
+jobid=${pid}            # -j <jobid>        # Job ID
+jobname="jobname"       # -J <jobname>      # Job name
+max_epochs=0		# --max-epochs <num> #maximum number of epochs (default, no max epochs. could still be a max number of steps) 
+num_channels=0    # -C <num_channels> # Depth of a layer in channels 0 --> default
+num_mapper_chunks=0        # --mapper-chunks <num_chunks> #how many chunks to use in the mappers, defaults to config value
+num_processor_chunks=0        # --processor-chunks <num_chunks> #how many chunks to use in the processor, defaults to config_value
+model="transformer"	# --model <transformer|gnn|graphtransformer> 
+num_gpus_per_model=0 # -gpm <gpus_per_model>  # Number of gpus per model. 0 --> all gpus in 1 model
+num_nodes=1         # -n <num_nodes>    # Number of nodes we are running 
+num_gpus=1          # --num-gpus <num_gpus> # Number of gpus we are running with. 0 --> try define ourselves
+num_heads=0         # --num-heads <num_heads> # Number of attn heads. 0 --> default
+num_workers=2	    # --num-workers <num_workers> #How many CPU dataloader processes to spawn per GPU
+overwrite_graph="false"	# --overwrite-graph #if set, the graph will be rebuilt even if a copy exists in $BUILD_DIR/graphs
+precision="bf16-fp32-opt" # -p|--precision=<precision> #precision to run in, default is explict bf16 with model weights stored in fp32
+profile=1		# --no-profile #if set, run 'anemoi-training train' instead of 'anemoi-training profile'
+use_nsys=0		# --nsys #if set, use nsys (or rocprof)
+res="n320"		# --res <res> #just used for rundir naming, res is gotten from the dataset at runtime
+rollout=1		# -R|--rollout <int> #set rollout, default is 1, max we use for oper training is 12
+train_end_yyyymmdd="" # --train-end <yyyymmdd>
+upload=0		# --upload #if given, syncs run to mlflow after completion
+val_end_yyyymmdd=""  # --val-end <yyyymmdd>
+val_start_yyyymmdd="" # --val-start <yyyymmdd>
+verbose=0
+# End usage
+
+lkey="num-channels: "
+lkey="$lkey batch-size: "
+lkey="$lkey dataset: "
+lkey="$lkey device: "
+lkey="$lkey dryrun"
+lkey="$lkey ens: "
+lkey="$lkey ensemble-size: "
+lkey="$lkey hydra-args: "
+lkey="$lkey hidden-res: "
+lkey="$lkey interactive"
+lkey="$lkey jobid: "
+lkey="$lkey jobname: "
+lkey="$lkey launcher: "
+lkey="$lkey max-epochs: "
+lkey="$lkey model: "
+lkey="$lkey num-gpus: "
+lkey="$lkey num-gpus-per-model: "
+lkey="$lkey num-heads: "
+lkey="$lkey num-mapper-chunks: "
+lkey="$lkey num-nodes: "
+lkey="$lkey num-processor-chunks: "
+lkey="$lkey num-workers: "
+lkey="$lkey overwrite-graph "
+lkey="$lkey precision: "
+lkey="$lkey no-profile "
+lkey="$lkey nsys "
+lkey="$lkey res: "
+lkey="$lkey rollout: "
+lkey="$lkey train-end: "
+lkey="$lkey train-batch-limit: "
+lkey="$lkey upload "
+lkey="$lkey val-batch-limit: "
+lkey="$lkey val-end: "
+lkey="$lkey val-start: "
+
+rkey=$(echo $lkey | perl -pe 's/-//g')
+
+LONG_FLAGS=""
+for lf in $(echo "$lkey $rkey" | perl -pe 's/\s+/\n/g'| sort -u)
+do
+    LONG_FLAGS="$LONG_FLAGS -l $lf"
+done
+
+FLAGS="1B:b:c:C:d:D:d:E:f:FgG:h:H:I:i:j:J:kl:L:M:n:N:p:P:r:R:s:S:t:T:vuUx:w:W"
+
+OPTS=`getopt -o $FLAGS $LONG_FLAGS -- "$@"`
+
+if [[ $? -ne 0 ]] ; then
+    echo "${cmd}: (Error) Invalid or unsupported options from 'getopt'" >&2
+    exit 1
+fi
+
+trueargs=$(echo "$OPTS" | perl -pe "s/^\s+//; s/(--\S+)\s+'/\${1}=/g; s/'//g; s/--\s*$//")
+abort=no
+
+# Check if pigz -- a parallel gzip'per -- is found
+pigz=$(which pigz 2>/dev/null || echo "pigz")
+
+eval set -- "$OPTS"
+
+while true
+do
+    case "$1" in
+    -B|--batch-size) batch_size=$2; shift 2;;
+    -C|--num-channels) num_channels=$2; shift 2;;
+    -d|--dataset) dataset="$2"; shift 2;;
+    -D|--device) device=$2; shift 2 ;;
+    --dryrun) dryrun=1; shift;;
+    -E|--ens|--ensemble-size) ens_size=$2; shift 2;;
+    -h|--hidden-res) hidden_res="$2"; shift 2;;
+    --hydra-args) hydra_args="$2"; shift 2;;
+    --interactive) interactive=1; shift;;
+    --launcher) launcher="$2"; shift 2;;
+    -j|--jobid) jobid="$2"; shift 2;;
+    -J|--jobname) jobname="$2"; shift 2;;
+    --max-epochs) max_epochs=$2; shift 2;;
+    --model) model=$2; shift 2;;
+    -gpm|--num-gpus-per-model) num_gpus_per_model=$2; shift 2;;
+    -n|--num-nodes) num_nodes=$2; shift 2;;
+    --num-gpus) num_gpus=$2; shift 2;;
+    --num-heads) num_heads=$2; shift 2;;
+    --num-mapper-chunks) num_mapper_chunks=$2; shift 2;;
+    --num-processor-chunks) num_processor_chunks=$2; shift 2;;
+    --no-profile) profile=0; shift;;
+    --nsys) use_nsys=1; shift;;
+    -w|--num-workers) num_workers=$2; shift 2;;
+    --overwrite-graph) overwrite_graph="true"; shift;;
+    -p|--precision) precision=$2; shift 2;;
+    --rollout) rollout=$2; shift 2;;
+    --res) res=$2; shift 2;;
+    --train-end) train_end_yyyymmdd=$2; shift 2;;
+    --train-batch-limit) batch_limit_train=$2; shift 2;;
+    --upload) upload=1; shift;;
+    --val-batch-limit) batch_limit_val=$2; shift 2;;
+    --val-end) val_end_yyyymmdd=$2; shift 2;;
+    --val-start) val_start_yyyymmdd=$2; shift 2;;
+	--) shift; break;;
+	*) echo "DEBUG: 1=${1:-}"; echo "DEBUG: 2=${2:-}"; abort=yes; break;;
+    esac
+done
+
+if [[ $abort = yes ]] ; then
+    echo "${cmd}: (Error) Invalid command line arguments : $cmdargs" >&2
+    ((errcnt += 1))
+fi
+
+set -eux
+
+srun=${srun:-"0"} # Do not use srun (=0) -- use srun (= "srun options") instead of mpirun/mpiexec
+
+# $OUTROOT = root directory where output files go -- normally defined in .again
+if [[ -z "${OUTROOT:-}" ]] ; then
+    echo "${cmd}: (Error) OUTROOT not defined" >&2
+    ((errcnt += 1))
+elif [[ ! -d "${OUTROOT}" ]] ; then
+    echo "${cmd}: (Warning) OUTROOT directory $OUTROOT not found -- creating ..." >&2
+    mkdir -p $OUTROOT || :
+    if [[ ! -d "${OUTROOT}" ]] ; then
+        echo "${cmd}: (Error) OUTROOT directory $OUTROOT could not be created" >&2
+        ((errcnt += 1))
+    fi
+fi
+
+cutjobid=$(echo "$jobid" | cut -d. -f1)
+runroot=$OUTROOT/$cmd/
+mkdir -p $runroot
+cd $runroot
+#TODO make res a command line arg
+#TODO pass jobname and jobid via command line
+hidden_res_string="" #default hidden res is either o96 or 6
+if [[ $hidden_res == "" ]];then
+	if [[ $model == "transformer" ]]; then
+		hidden_res_string="_o96"
+	else
+		hidden_res_string="_h6"
+	fi
+else
+	if [[ $model == "transformer" ]]; then
+                hidden_res_string="_$hidden_res"
+        else
+                hidden_res_string="_h$hidden_res"
+        fi
+fi
+rundir=$(pwd)/${num_nodes}N_${num_gpus_per_model}gpm_${model}_${num_channels}c_${res}${hidden_res_string}_${rollout}r_${ens_size}e.${jobname}-${cutjobid}
+rm -rf $rundir
+mkdir -p $rundir
+#cd $rundir
+
+
+export AIFS_NUM_GPUS=$num_gpus
+export AIFS_NUM_NODES=$num_nodes
+export AIFS_NUM_GPUS_PER_NODE=$((num_gpus / num_nodes))
+
+export HYDRA_FULL_ERROR=1 
+
+if [[ $interactive -eq 1 ]]; then
+	launcher=""
+fi
+echo "launcher=$launcher"
+
+if [[ ${launcher} == "srun" ]]; then
+	tasks=$(( AIFS_NUM_GPUS_PER_NODE * AIFS_NUM_NODES ))
+	launcher="${launcher} --nodes=$num_nodes -n $tasks --cpus-per-task=$SLURM_CPUS_PER_TASK --ntasks-per-node=$AIFS_NUM_GPUS_PER_NODE -K1 " 
+	if [[ $device == "gpu" ]]; then
+		launcher="${launcher} --gpus-per-node=$AIFS_NUM_GPUS_PER_NODE "
+	fi
+fi
+
+dryrun_cmd=""
+if [[ $dryrun -eq 1 ]] ; then
+    dryrun_cmd="--cfg all"
+fi
+
+prefix=""
+if [[ $RAPS_AIFS_ENV_TYPE == "hybrid_container" ]]; then
+	prefix="$RAPS_AIFS_BUILD_DIR/bin/with-container"
+fi
+
+#ensure venv bin is on PATH
+if [[ $RAPS_AIFS_ENV_TYPE == "venv" ]]; then
+	export PATH="$RAPS_AIFS_BUILD_DIR/venv/bin:$PATH"
+fi
+
+dataloader_cmd="dataloader.num_workers.training=$num_workers dataloader.num_workers.validation=$num_workers"
+#set batch size
+if [[ $batch_size > 1 ]]; then
+	if [[ $num_gpus_per_model > 1 ]]; then
+		echo "Error. batch size > 1 is not compatible with model sharding. You have batch size $batch_size and $num_gpus_per_model gpus per model. exiting..."
+		exit 0	
+	fi
+	echo "Using a batch size of $batch_size"
+	dataloader_cmd="$dataloader_cmd dataloader.batch_size.training=$batch_size dataloader.batch_size.validation=$batch_size"
+fi
+
+
+num_heads_cmd=""
+default_num_heads=16 #TODO should read from config
+if [[ $num_gpus_per_model -gt $default_num_heads ]]; then
+    echo "WARNING. #GPUs/model ($num_gpus_per_model) > #heads ($default_num_heads). setting #heads to $num_gpus_per_model"
+    num_heads_cmd="model.processor.num_heads=$num_gpus_per_model model.encoder.num_heads=$num_gpus_per_model model.decoder.num_heads=$num_gpus_per_model"
+fi
+if [[ ! $num_heads -eq 0 ]] ; then
+    num_heads_cmd="model.processor.num_heads=$num_heads model.encoder.num_heads=$num_heads model.decoder.num_heads=$num_heads"
+fi
+
+limit_batch_cmd=""
+if [ ! $batch_limit_train -eq 0 ]; then
+	limit_batch_cmd="$limit_batch_cmd dataloader.limit_batches.training=$batch_limit_train"
+fi
+if [ ! $batch_limit_val  -eq 0 ]; then
+	limit_batch_cmd="$limit_batch_cmd dataloader.limit_batches.validation=$batch_limit_val"
+fi
+
+rollout_cmd="training.rollout.start=$rollout training.rollout.max=$rollout"
+
+max_epochs_cmd=""
+if [ ! $max_epochs -eq 0 ]; then
+	max_epochs_cmd="training.max_epochs=$max_epochs"
+fi
+
+device_cmd="hardware.accelerator=$device"
+
+#check dates have been provided
+# TODO some way to generate these
+if [ "$train_end_yyyymmdd" == "" ] || [ "$val_start_yyyymmdd" == '' ] || [ "$val_end_yyyymmdd" == '' ] ; then
+	echo "Error. training end, validation start and validation end dates not provided. exiting ..."
+	exit 1
+fi
+
+echo "rundir = $rundir"
+
+if [[ $dataset == "" ]]; then
+	echo "Error. dataset not provided! Please rerun with --dataset=<dataset.zarr>"
+	exit 1
+fi
+
+nsys_cmd=""
+if [ $use_nsys -eq 1 ]; then
+	#disable other profiling while using nsight/rocprf
+	#sometimes there are clashes which lead to errors
+	profile=0
+	echo "Disable anemoi-profiling since you are running with nsys/rocprof"
+
+	profiling_bin=nsys
+	if command -v rocm-smi 2>&1 >/dev/null; then
+		profiling_bin=rocprofv3
+	fi
+	#check if nsys can be found
+	$prefix command -v $profiling_bin 2>&1 > /dev/null ||{
+		echo "error. Profiling was requested but the $profiling_bin binary can't be found. exiting..."
+		exit 1
+	}
+	mkdir -p $rundir/nsys
+	nsys_output=$rundir/nsys/out #just proc 0 uses nsys
+
+	#check if python function trace file can be found
+	nsys_python_trace_flag=""
+	anemoi_python_trace_file=$RAPS_AIFS_ROOT_DIR/etc/aifs/profiling/nsys/PythonFunctionsTrace/anemoi.json
+	if [[ -f $anemoi_python_trace_file ]]; then
+		nsys_python_trace_flag="--python-functions-trace=$anemoi_python_trace_file"
+	fi
+
+	if [[ $profiling_bin == "nsys" ]]; then
+		#--gpu-metrics-devices=0 
+		nsys_cmd="nsys profile -o $nsys_output -f true --cuda-memory-usage true $nsys_python_trace_flag --"
+	else
+		nsys_cmd="rocprofv3 --hip-trace -- "
+	fi
+
+fi
+
+
+ver_echo "Saving NCCL debug info to $rundir/logs/nccl"
+mkdir -p $rundir/logs
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=INIT,IB,BOOTSTRAP,ENV,NET,GRAPH,TUNING,ALLOC,CALL,NVLS,REG,PROFILE,RAS #everything but COLL and P2P, which are quite verbose
+export NCCL_DEBUG_FILE=$rundir/logs/nccl.%h.%p
+
+ver_echo "saving python env to $rundir/python_env.txt"
+$prefix pip freeze > $rundir/python_env.txt
+
+cp $RAPS_AIFS_BUILD_DIR/sources/versions.txt $rundir||{
+                echo "$RAPS_AIFS_BUILD_DIR/sources/versions.txt not found. Not copying to rundir"
+                exit 1
+}
+
+model_cmd=""
+if [[ $model == "transformer" ]]; then
+#check if sliding window attn is available
+flash_attn_available=$(grep -q "^flash_attn\|flash-attn" $rundir/python_env.txt && echo 1 || echo 0)
+#TODO broken with nvidia containers, cant match 'torch @ file:///opt/transfer/torch-2.5.0a0%2Be000cf0ad...'
+#But they have flash attn anyway so we get lucky and pass
+torch_version=$(grep "^torch=" $rundir/python_env.txt | awk -F'[.=]' '/^torch==/ {print $3 "." $4}') 
+flex_attn_available=$(echo $torch_version'>='2.5 | bc -l)
+
+if [[ $flash_attn_available -eq 1 ]]; then
+	ver_echo "Flash attn is installed"
+fi
+if [[ $flex_attn_available -eq 1 ]]; then
+	ver_echo "torch >= 2.5.0 is installed => flex attn is available"
+fi
+if [[ $flex_attn_available -eq 0 ]] && [[ $flash_attn_available -eq 0 ]]; then
+	echo "Error. Neither flash attn or flex attn was found in your python env. exiting ..."
+	exit 1
+fi
+elif [[ $model == "gnn" ]] || [[ $model == "graphtransformer" ]]; then
+
+model_cmd="model=$model ~model.processor.window_size"
+else
+	echo "Error. invalid model '$model' given. exiting..."
+	echo "please rerun with --model=<gnn|graphtransformer|transformer>"
+	exit 1
+fi
+
+
+#TODO list of valid dtypes
+precision_cmd="training.precision=$precision"
+layer_norm="torch.nn.LayerNorm"
+
+if [[ ! $precision == "bf16-fp32-opt" ]]; then
+	# we are using automatic mixed precision so we need to cast the output of the layernorms
+	layer_norm="anemoi.models.layers.normalization.AutocastLayerNorm"
+	# TODO fix bug in ens proc where other layernorms arent set
+fi
+echo "Running in precision '$precision'. Using the following layernorm: '$layer_norm'"
+precision_cmd="$precision_cmd model.layer_kernels.QueryNorm._target_=$layer_norm  model.layer_kernels.KeyNorm._target_=$layer_norm"
+
+
+if [[ ! $num_mapper_chunks == "0" ]]; then
+model_cmd="model.encoder.num_chunks=$num_mapper_chunks model.decoder.num_chunks=$num_mapper_chunks $model_cmd"
+fi
+if [[ ! $num_processor_chunks == "0" ]]; then
+model_cmd="model.processor.num_chunks=$num_processor_chunks $model_cmd"
+fi
+
+#optionally enable ens
+ens_cmd=""
+if [[ $ens_size -gt 0 ]]; then
+
+#overwrite the model set above with the ens version, hacky
+#both will be passed to the command line
+num_gpus_per_ens=$((ens_size * num_gpus_per_model))
+if [[ $num_gpus_per_ens -gt $num_gpus ]]; then
+	echo "Error. number of GPUs required for an ens group $num_gpus_per_ens ($num_gpus_per_model GPUs/model * $ens_size ENS size) is larger than the total number of GPUs $num_gpus"
+	echo "Exiting..."
+	exit 1
+fi
+ens_cmd="training=less_memory_loss_ensemble datamodule=ens model=${model}_ens hardware.files.truncation=null hardware.files.truncation_inv=null +hardware.num_gpus_per_ensemble=$num_gpus_per_ens training.ensemble_size_per_device=1"
+fi
+
+
+#Check graph cache for graph, otherwise build it
+enc_to_proc_edge_type='cutoff_factor'
+enc_to_proc_edge_num='0.6'
+enc_to_proc_id='0'
+proc_to_dec_edge_type='num_nearest_neighbours'
+proc_to_dec_edge_num='3'
+proc_to_dec_id='1'
+
+if [[ $enc_to_proc_edge_type == 'cutoff_factor' ]]; then
+enc_to_proc_edge_type_short='CoF'
+else
+enc_to_proc_edge_type_short='NN'
+fi
+if [[ $proc_to_dec_edge_type == 'cutoff_factor' ]]; then
+proc_to_dec_edge_type_short='CoF'
+else
+proc_to_dec_edge_type_short='NN'
+fi
+
+source_grid=$res
+hidden_grid_cmd=""
+window_size_cmd=""
+if [ $model == 'transformer' ]; then
+graph_type='encoder_decoder_only'
+if [[ $hidden_res == "" ]]; then
+hidden_res='o96'
+else
+	if [[ $hidden_res == "o256" ]]; then
+		window_size=2160
+		window_size_cmd="model.processor.window_size=$window_size"
+	fi
+fi
+hidden_keyword='grid'
+else
+graph_type='multi_scale'
+if [[ $hidden_res == "" ]]; then
+hidden_res=6
+fi
+hidden_keyword='resolution'
+proc_to_dec_id='2' #3 graphs in multiscale
+#Need to add this to config to use the newest version of graphs
+#TODO remove plus once hackathon merged with main
+#have to remove grid from config bc its a transformer thing
+hidden_grid_cmd="graph.edges.1.edge_builders.0.scale_resolutions=$hidden_res ~graph.nodes.hidden.node_builder.grid"
+fi
+graph_name="${graph_type}.${source_grid}_${enc_to_proc_edge_num}${enc_to_proc_edge_type_short}_${hidden_res}_${proc_to_dec_edge_num}${proc_to_dec_edge_type_short}_${source_grid}.graph"
+model_cmd="$model_cmd $window_size_cmd"
+
+graph_commands="graph.overwrite=$overwrite_graph hardware.paths.graph=${RAPS_AIFS_BUILD_DIR}/graphs/ hardware.files.graph=${graph_name} graph=${graph_type} graph.nodes.hidden.node_builder.${hidden_keyword}=${hidden_res} graph.edges.${enc_to_proc_id}.edge_builders.0.${enc_to_proc_edge_type}=${enc_to_proc_edge_num} graph.edges.${proc_to_dec_id}.edge_builders.0.${proc_to_dec_edge_type}=${proc_to_dec_edge_num} $hidden_grid_cmd"
+
+#add any system specific hyra args to command line if they are provided
+#add them at the front so the users commands always come out on top
+if [ ! -z ${AIFS_SYSTEM_SPECIFIC_HYDRA_ARGS+x} ]; then 
+	hydra_args="$AIFS_SYSTEM_SPECIFIC_HYDRA_ARGS $hydra_args"
+fi
+
+anemoi_training_mode="profile"
+if [[ $profile == "0" ]]; then
+anemoi_training_mode="train"
+fi
+cd `realpath ${RAPS_AIFS_BUILD_DIR}/config` #stupid hydra means we have to be in the config dir if we want that to be the only files used
+
+#launcher="" 
+
+run_cmd="$prefix anemoi-training $anemoi_training_mode $dryrun_cmd --config-name=raps $model_cmd model.num_channels=$num_channels hardware.files.dataset=$dataset \
+	dataloader.training.end=$train_end_yyyymmdd dataloader.validation.start=$val_start_yyyymmdd dataloader.validation.end=$val_end_yyyymmdd \
+	$limit_batch_cmd hardware.num_gpus_per_model=$num_gpus_per_model $max_epochs_cmd $ens_cmd \
+	$num_heads_cmd $dataloader_cmd hardware.paths.output=$rundir/train-outputs/ \
+	data.resolution=$res $rollout_cmd $graph_commands $device_cmd $precision_cmd $hydra_args"
+
+#if [ $SLURM_PROCID -eq 0 ]; then
+ver_echo "saving run_cmd to $rundir/run_cmd.txt"
+echo "$launcher $run_cmd" > $rundir/run_cmd.txt
+ver_echo "saving run config to $rundir/config.txt"
+$run_cmd --cfg all > $rundir/config.txt
+#fi
+
+
+#if nvidia-smi is available, launch it and have it monitor the power usage
+#if command -v nvidia-smi 2>&1 >/dev/null; then
+#	nvidia-smi --query-gpu=power.draw --format=csv --loop-ms=1000 2>&1 | $rundir/logs/nvidia-smi-power.txt
+#fi
+
+
+flash_attn_required=$(grep "flash_attention" $rundir/config.txt | wc -l)
+if [[ $flash_attn_required == 1 ]]; then
+#test if flash attention is installed
+$prefix pip show flash_attn 2>&1 > /dev/null
+is_flash_attn_not_installed=$?
+if [[ ! $is_flash_attn_not_installed == 0 ]]; then
+	echo "Warning! flash attention is specified in the processor config, but doesnt seem to be installed"
+	echo "Exiting..."
+	exit 1
+fi
+fi
+
+ulimit -c 0 # disbale core dumps
+
+printenv | tee $rundir/env.txt
+
+train_exit_code=0
+echo "finally running, outputting to rundir=$rundir"
+start_time=$(date +%s)
+echo "Start time: $start_time"  | tee $rundir/out.txt
+$nsys_cmd $launcher $run_cmd 2>&1 | tee -a $rundir/out.txt || train_exit_code=$?
+end_time=$(date +%s)
+echo "End time: $end_time"  | tee -a $rundir/out.txt
+
+#post processing
+#save description of graph used
+$prefix anemoi-graphs describe ${RAPS_AIFS_BUILD_DIR}/graphs/${graph_name} > $rundir/graph.txt 2> $rundir/graph.err || echo "cant describe graph. Check '$rundir/graph.err' for the exact error"
+
+$prefix python -c 'import torch; print(torch.__config__.show())' > $rundir/pytorch_config.txt || echo "cant get torch config"
+
+#gets runId (assumes the one used is the first occurance, could be a wrong assumption)
+run_id=`awk '/INFO Adding extra information to checkpoint/ {match($0, /\/([^/]+)\/[^/]+$/, arr); print arr[1]; exit}' $rundir/out.txt`
+last_inf_ckpt=$rundir/train-outputs/checkpoint/$run_id/inference-last.ckpt
+if [[ -f $last_inf_ckpt ]]; then
+	ln -s $last_inf_ckpt $rundir/inference-last.ckpt
+fi
+
+#if [[ $train_exit_code == "0" ]]; then
+#try generate plots based off the mlflow plots in rundir
+#$RAPS_AIFS_ROOT_DIR/bin/plot_aifs $rundir
+#mkdir -p $rundir/plots
+# generate plots based on the pytorch profiler ('memory profiler')
+#$prefix python $RAPS_AIFS_ROOT_DIR/etc/aifs/plotting_scripts/plot_training.py $rundir -o $rundir/plots
+#fi
+
+if [[ $upload -eq 1 ]]; then
+	echo "'--upload' given, will upload run to mlflow"
+	$RAPS_AIFS_ROOT_DIR/bin/upload_to_mlflow $rundir
+fi
+
+exit 0

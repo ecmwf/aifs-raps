@@ -1,0 +1,4 @@
+.aifsenv
+*ecsbatch*
+*.out
+build*

@@ -1,0 +1,237 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+set -ex
+
+#this file takes in a source dataset and a dest dataset path and a number of dates,
+# and clones the given dataset to the dest path with the given number of dates
+# By default, the dataset will be cloned in parallel over 16 threads
+# e.g. ./aifs-clone-dataset /home/mlx/ai-ml/datasets/aifs-od-an-oper-0001-mars-o1280-2023-2023-6h-v1-one-month.zarr /lus/h2tcst01/ai-bm/datasets/cloned-datasets/cloned_1280.zarr 200
+
+
+#copies a single date chunk
+#extracted to a function so it can be called in parallel across dates
+copy_date() {
+set -u
+X=$1
+max_first=$2
+max_second=$3
+shard_by_vars=$4
+src=$5
+dest=$6
+
+X_in=$((X%max_first)) #roll over the input dataset
+for Y in $(seq 0 $max_second ); do
+  if [ $shard_by_vars == 1 ]; then
+      cp $src/data/$X_in.$Y.0.0 $dest/data/$X.$Y.0.0
+  else
+      cp $src/data/$X_in.0.0.$Y $dest/data/$X.0.0.$Y
+  fi
+done
+}
+export -f copy_date
+
+# function which takes a date and a number of dates
+# by default it works back from the given date by 6h*num_dates and prints the start date
+function calculate_date_range () {
+#parse inputs
+# usage: ./calculate-end-dates.sh [date] [num-dates] [?start-date] [?verbose]
+
+#calculate start date working back from a given end date
+calculate_start_date=1
+
+verbose=0
+if [[ $4 == 1 ]]; then
+    verbose=1 #only print the calculated date
+fi
+
+#calculate end date instead, based on a give start date
+if [[ $3 == 1 ]]; then
+    calculate_start_date=0
+fi
+
+if [[ $2 == "" ]] || [[ $1 == "" ]]; then
+echo "error! date or num_dates not provided. usage: ./calculate-dates 'date (str)' 'num_dates (int)' ?'calculate-end-date (int)'"
+echo "exiting..."
+exit 0
+fi
+
+if [[ calculate_start_date ]]; then
+start_date=""  
+end_date=$1
+else
+start_date=$1  
+end_date=""
+fi
+
+number_of_dates=$2
+frequency_hours=6
+
+if [[ -n "$start_date" && -z "$end_date" ]]; then
+    # Calculate end_date from start_date
+    start_ts=$(date -d "$start_date" +%s)
+    duration_seconds=$(( (number_of_dates - 1) * frequency_hours * 3600 ))
+    end_ts=$((start_ts + duration_seconds))
+    end_date=$(date -u -d "@$end_ts" +"%Y-%m-%dT%H:%M:%S")
+
+elif [[ -n "$end_date" && -z "$start_date" ]]; then
+    # Calculate start_date from end_date
+    end_ts=$(date -d "$end_date" +%s)
+    duration_seconds=$(( (number_of_dates - 1) * frequency_hours * 3600 ))
+    start_ts=$((end_ts - duration_seconds))
+    start_date=$(date -u -d "@$start_ts" +"%Y-%m-%dT%H:%M:%S")
+
+else
+    echo "Please set either start_date OR end_date (not both)."
+    exit 1
+fi
+
+if [[ $verbose == 1 ]]; then
+    echo "Start date: $start_date"
+    echo "End date: $end_date"
+else
+    if [[ $calculate_start_date == 1 ]]; then
+    echo "$start_date"
+    else
+    echo "$end_date"
+    fi
+fi
+}
+
+
+#function which clones a dataset
+function clone_dataset() {
+src=$1
+#src=$PWD/$1
+
+#dest=$PWD/$2
+dest=$2
+
+num_dates=$3
+
+#count=$(ls $src/data | grep ".0.0.0$" | wc -l)
+count=$(ls $src/data | grep "^0." | wc -l)
+
+proc_count=1
+proc_id=0 #0-(proc_count-1)
+dryrun=0
+block_size=$((num_dates/proc_count))
+block_start=$((block_size * proc_id))
+block_stop=$((block_start + block_size - 1))
+
+echo "Process $proc_id will copy '$block_start.0.0.0' -> '$block_stop.0.0.0'"
+range=($block_start $block_stop)
+if [[ $dryrun == 1 ]]; then
+        exit
+fi
+
+
+mkdir -p $dest
+mkdir -p $dest/data
+metadata=1
+if [[ $metadata == '1' ]]; then
+cd $src
+rsync -avr `ls . -I data` $dest
+rsync .z* $dest
+rsync data/.z* $dest/data
+cd -
+fi
+
+hack_dates=1
+if [[ $hack_dates == '1' ]]; then
+#edit the anemoi datasets and zarr metadata to reflect the greater chunks
+# need to change shape in ./data/.zarray and ./.zattrs and the start and
+awk "/\"shape\": \[/ { in_shape=1; print; getline; sub(/[0-9]+/, $num_dates); print; next } in_shape && /\]/ { in_shape=0 } { print }" $src/.zattrs > .zattrs.temp
+mv .zattrs.temp $dest/.zattrs
+awk "/\"shape\": \[/ { in_shape=1; print; getline; sub(/[0-9]+/, $num_dates); print; next } in_shape && /\]/ { in_shape=0 } { print }" $src/data/.zarray > .zarray.temp
+mv .zarray.temp $dest/data/.zarray
+
+#update zarr/dates/.zarry
+#change any number in th eline after "chunks" and "shapes" to $num_dates
+awk -v dates="$((num_dates-1))" '/"chunks"|"shape"/ {print; getline; sub(/[0-9]+/, dates); print; next} 1'  $src/dates/.zarray > .zarray.temp
+mv .zarray.temp $dest/dates/.zarray
+#also need to change the start date in ./.zattrs
+end_date="2023-12-31T18:00:00" # i like to give afixed end date bc it makes training/val split easier
+start_date=$(calculate_date_range '2023-01-01T18:00:00' 200)
+awk -v new_start=$start_date -v new_end=$end_date '
+{
+    if ($0 ~ /"start":/) {
+        sub(/"start": *"[^"]+"/, "\"start\": \"" new_start "\"")
+    }
+    if ($0 ~ /"end":/) {
+        sub(/"end": *"[^"]+"/, "\"end\": \"" new_end "\"")
+    }
+    print
+}
+' $dest/.zattrs > .zattrs.temp && mv .zattrs.temp $dest/.zattrs
+fi
+
+copy_data=1
+if [[ $copy_data == "1" ]]; then
+start=${range[0]}
+end=${range[1]}
+data=""
+cd $src/data
+
+# determine if the batches are sharded by grid or var dim
+# if they are sharded by variable dim (the usual) then the final number in the filename X.X.X.X will be zero
+# if num_chunks matches num_var_chunks then 
+num_chunks=$(ls 0.* | wc -l)
+num_var_chunks=$(ls 0.*.0 | wc -l)
+num_grid_chunks=$(ls 0.0.0.* | wc -l)
+if [[ $num_chunks == $num_var_chunks ]]; then
+	shard_by_vars=1
+elif [[ $num_chunks == $num_grid_chunks ]]; then
+	shard_by_vars=0
+else
+	echo "Error. Sharded across a dimension other then grids or var."
+	echo "date zero has $num_chunks chunks but only $num_var_chunks var chunks and $num_grid_chunks grid chunks. exiting..."
+	exit 1
+fi
+
+
+max_first=$(ls *.0.0.0 | sed 's\.0.0.0$\\' |sort -un | tail -n 1)
+if [[ $shard_by_vars == 1 ]]; then
+max_second=$(ls 0.* | sed 's/^0\.//' | sed 's/\.0\.0//' | sort -un | tail -n 1)
+else
+max_second=$(ls 0.* | sed 's/^0\.0\.0\.//' | sort -un | tail -n 1)
+fi
+
+num_jobs=16
+if command -v parallel >/dev/null 2>&1; then
+    # GNU parallel exists
+    echo "Cloning the dataset in parallel with $num_jobs threads"
+    seq "$start" "$end" | parallel -j "$num_jobs" copy_date {} "$max_first" "$max_second" "$shard_by_vars" "$src" "$dest"
+else
+    echo "parallel not found, running sequentially"
+    for i in $(seq "$start" "$end"); do
+        copy_date "$i" "$max_first" "$max_second" "$shard_by_vars" "$src" "$dest"
+    done
+fi
+cd -
+fi 
+}
+
+
+#parameter checking
+if [[ $1 == "" ]] || [[ $2 == "" ]] || [[ $3 == "" ]] ; then
+  echo "Error! some required parameters are missing"
+  echo "Expected usage: ./aifs-clone-dataset /abs/path/to/src/dir /abs/path/to/dest/dir num_dates [verbose]"
+  echo "Exiting..."
+  exit 1
+fi
+
+#ensure src and dest dir are absolute paths
+if [[ ! ${1:0:1} == "/" ]] || [[ ! ${2:0:1} == "/" ]] ; then
+	echo "Error! src and dest dir must be given as absolute paths"
+	echo "Exiting..."
+	exit 1
+fi
+
+clone_dataset $1 $2 $3 $4 

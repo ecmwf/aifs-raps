@@ -1,0 +1,34 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+rundir=$1
+
+if ! command -v gnuplot > /dev/null 2>&1; then
+    echo "gnuplot cant be found, no plots will be generated"
+else
+    #Try generate plots based on mlflow logging
+    plotdir=$rundir/plots
+    mkdir -p $plotdir
+    # These assume there will only be 1 experiement id containing 1 experiment in $rundir
+    # Currently this is true bc rundir is different for each run
+    experiment_name=`ls $rundir/train-outputs/logs/mlflow/ | grep "^[0-9]" | head -n 1` #numeric id representing an experiment name e.g. "aifs_profiling"
+    experiment_id=`ls $rundir/train-outputs/logs/mlflow/$experiment_name/ | grep "^[0-9a-z]" | head -n 1` #alphanumeric string representing experiment sub-id
+    mlflow_dir=$rundir/train-outputs/logs/mlflow/$experiment_name/$experiment_id
+    echo "mlflow dir found to be $mlflow_dir"
+    mlflow_system_metics_dir=$mlflow_dir/metrics/system
+
+    plotting_scripts_dir=$RAPS_AIFS_ROOT_DIR/etc/aifs/plotting_scripts
+    for filename in $plotting_scripts_dir/*.gnuplot; do
+        filename=`basename $filename .gnuplot`
+        echo "plotting $filename"
+        gnuplot -e "root_dir='$mlflow_system_metics_dir'" $plotting_scripts_dir/$filename.gnuplot
+        mv out.png $plotdir/$filename.png
+    done
+fi

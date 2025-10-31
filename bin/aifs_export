@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+command_exists () { type "$1" &> /dev/null ; }
+
+cmddir=$(dirname $(which $0))
+root_dir=$(cd $cmddir/.. && pwd)
+cd $root_dir
+
+# Usage: model
+build_dir=""	# --build|--build-dir <path to build dir>
+tmp_dir="$TMPDIR/raps-export"	# --tmp|--tmp-dir <path to tmp dir> #where the zip archive is built
+dryrun=0       # --dryrun #if set, create final dir but with empty wheels and src dirs
+# End usage
+
+
+lkey="build: "
+lkey="$lkey build-dir: "
+lkey="$lkey tmp: "
+lkey="$lkey tmp-dir: "
+lkey="$lkey dryrun "
+
+rkey=$(echo $lkey | perl -pe 's/-//g')
+
+LONG_FLAGS=""
+for lf in $(echo "$lkey $rkey" | perl -pe 's/\s+/\n/g'| sort -u)
+do
+    LONG_FLAGS="$LONG_FLAGS -l $lf"
+done
+
+FLAGS="b"
+
+OPTS=`getopt -o $FLAGS $LONG_FLAGS -- "$@"`
+
+if [[ $? -ne 0 ]] ; then
+    echo "${cmd}: (Error) Invalid or unsupported options from 'getopt'" >&2
+    exit 1
+fi
+
+trueargs=$(echo "$OPTS" | perl -pe "s/^\s+//; s/(--\S+)\s+'/\${1}=/g; s/'//g; s/--\s*$//")
+abort=no
+
+# Check if pigz -- a parallel gzip'per -- is found
+pigz=$(which pigz 2>/dev/null || echo "pigz")
+
+eval set -- "$OPTS"
+
+while true
+do
+    case "$1" in
+    --build|--build-dir) build_dir=$2; shift 2;;
+    --tmp|--tmp-dir) tmp_dir=$2; shift 2;;
+    --dryrun) dryrun=1; shift;;
+        --) shift; break;;
+        *) echo "DEBUG: 1=${1:-}"; echo "DEBUG: 2=${2:-}"; abort=yes; break;;
+    esac
+done
+
+if [[ $abort = yes ]] ; then
+    echo "${cmd}: (Error) Invalid command line arguments : $cmdargs" >&2
+    ((errcnt += 1))
+fi
+
+if [[ $build_dir == "" ]]; then
+	echo "Error. 'build_dir' not set. please rerun with '--build-dir <path_to_build_dir>'"
+	exit 1
+fi
+
+if [[ $dryrun -eq 1 ]]; then
+       echo "--dryrun passed. Will not actually copy wheels or sources"
+fi
+
+set -eux
+
+build_dir=`readlink -f $build_dir`
+
+source $build_dir/venv/bin/activate
+
+echo "export archive will be built in $tmp_dir. You can override this with --tmp-dir <path/to/tmpdir>"
+rm -rf $tmp_dir
+mkdir -p $tmp_dir
+
+#get sources
+#change to build_dir before tarring, so we dont save the absolute path
+if [ $dryrun -eq 0 ]; then
+	tar cvzf $root_dir/sources.tar.gz -C $build_dir sources
+else
+	mkdir -p $tmp_dir/sources/aifs_training $tmp_dir/sources/aifs_inference $tmp_dir/sources/aifs_models 
+	tar cvzf $root_dir/sources.tar.gz -C $tmp_dir sources
+	rm -rf $tmp_dir/sources
+fi
+mv $root_dir/sources.tar.gz $tmp_dir
+
+python --version > $tmp_dir/python_version.txt
+
+pip_cache="--no-cache"
+if [ ! -z ${INPUT_PIP_CACHE_DIR+x} ]; then
+	echo "Caching pip wheels in $INPUT_PIP_CACHE_DIR"
+	pip_cache="--cache-dir=$INPUT_PIP_CACHE_DIR"
+fi
+
+#get pip wheels
+mkdir $tmp_dir/wheels
+pip freeze > $tmp_dir/requirements.txt
+# remove libs with irregular installs
+sed -i '/^-e /d' $tmp_dir/requirements.txt # remove editable installs
+sed -i '/^flash/d' $tmp_dir/requirements.txt # remove flash attn
+sed -i '/^mlflow_export_impor/d' $tmp_dir/requirements.txt # remove mlflow_export_import
+if [ $dryrun -eq 0 ]; then
+	pip download $pip_cache -r $tmp_dir/requirements.txt -d $tmp_dir/wheels
+	pip download $pip_cache -d $tmp_dir/wheels setuptools-scm>=8
+	pip download $pip_cache -d $tmp_dir/wheels wheel
+fi
+
+output=$root_dir/build.tar.gz
+tar cvzf $output -C $tmp_dir .
+echo "Venv exported to $output"
+

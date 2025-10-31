@@ -1,0 +1,179 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+# jobinfo: gathers runtime information from AIFS jobs. Should be called inside rundir
+#
+
+# TODO currently doesnt work for inference
+
+DEBUG=${DEBUG:-0}
+hdrdone=0
+
+exec 2>&1
+[[ X"$DEBUG" != X0 ]] && set -x
+
+shopt -s extglob # enables extglob i.e. @(x|y|z) regular expressions in bash
+set -u
+
+#echo "usage ./aifs-jobinfo [?rundir]"
+#echo "If no rundir is given, rundir is assumed to be cwd"
+
+input_rundir_list="$@"
+if [[ $input_rundir_list == "" ]]; then
+	echo "Error. usage; 'aifs-jobinfo [/path/to/rundir0 /path/to/rundir1 ...]'"
+	echo "exiting..."
+	exit 0
+
+fi
+
+for rundir in $input_rundir_list; do
+
+cd $rundir
+
+#finds if the current rundir is for inference or training
+# checks for /inf/ or /train/ in the rundir
+function detect_mode()
+{
+dir=$PWD
+if [[ "$dir" =~ "/inf/" ]]; then
+    echo "inference"
+elif  [[ "$dir" =~ "/train/" ]]; then
+    echo "training"
+else
+    echo "Cannot determine whether this rundir is inference or training. Exitting..."
+    exit 0
+fi
+}
+
+mode=$(detect_mode)
+
+if [[ $mode == "training" ]]; then
+
+function header()
+{
+    if [[ $hdrdone -eq 0 ]] ; then
+	echo "NodeCount,GPUCount,GPUsPerModel,AggrBatchSize,BatchSizePerModel,EnsembleSize,NumChannels,Model,SourceRes,HiddenRes,Rollout,JobName,TrainIterPerEpoch,ValIterPerEpoch,NumEpochs,NumWorkerPerGPU,MapperChunks,ProcChunks,Dataset,Graph,Launcher,rundir,Success?,StartTime,EndTime,TrainingEpochTimeS,AvgTrainingThroughput,PeakGPUMem"
+        hdrdone=1
+    fi
+}
+header
+
+#find files
+config=./config.txt
+graph=./graph.txt
+out=./out.txt
+python=./python_env.txt
+env=./env.txt
+pytorch=./pytorch_config.txt
+run_cmd=./run_cmd.txt
+
+#TEMPLATE to read from run_cmd.txt
+#=$(egrep -a -o "[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+#-o => keep only match
+# search throught run_cmd.txt for "hardware.num_gpus_per_model=2", split along "=" and return the RHS e.g. 2
+
+node_count=$(egrep -a -o "AIFS_NUM_NODES=[a-zA-Z0-9._-]*" $env 2>/dev/null | cut -d '=' -f2 | xargs) 
+gpu_count=$(egrep -a -o "AIFS_NUM_GPUS=[a-zA-Z0-9._-]*" $env 2>/dev/null | cut -d '=' -f2 | xargs) 
+gpus_per_model=$(egrep -a -o "hardware.num_gpus_per_model=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+num_models=$((gpu_count / gpus_per_model )) #not outputed, but used to calculate global batch size
+batch_per_model=1 #TODO low prio fix
+batch_size=$(( batch_per_model * num_models)) #global/aggregate batch size (BPM * model count)
+ens_size=$(egrep -a -o "hardware.num_gpus_per_ensemble=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+num_channels=$(egrep -a -o "model.num_channels=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+model=$(egrep -a -o "model=[a-zA-Z._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+source_res=$(egrep -a -o "data.resolution=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+hidden_res=$(egrep -a -o "graph.nodes.hidden.node_builder.(grid|resolution)=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+max_rollout=$(egrep -a -o "training.rollout.max=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+job_name=$(egrep -a -o "jobname=[a-zA-Z0-9._-]*" $env 2>/dev/null | cut -d '=' -f2 | xargs) 
+train_iter_per_epoch=$(egrep -a -o "dataloader.limit_batches.training=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+val_iter_per_epoch=0 #TODO, how to search multiple places and fallback to default
+num_epochs=$(egrep -a -o "training.max_epochs=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+num_workers=$(egrep -a -o "dataloader.num_workers.training=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+mapper_chunks=$(egrep -a -o "model.mapper.num_chunks=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+proc_chunks=$(egrep -a -o "model.processor.num_chunks=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+dataset=$(egrep -a -o "hardware.files.dataset=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+graph=$(egrep -a -o "hardware.files.graph=[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+launcher=$(egrep -a -o "^(srun|torchrun)" $run_cmd 2>/dev/null | xargs )
+rundir=$(basename $PWD)
+grep -q "Benchmark Profiler Summary" "$out"
+success=$(( $? == 0 ? 1 : 0 ))
+
+start_time=$(egrep -a "^Start time:" $out 2>/dev/null | cut -d ' ' -f3 | xargs)
+end_time=$(egrep -a "^End time:" $out 2>/dev/null | cut -d ' ' -f3 | xargs)
+training_epoch_time_s=$(egrep -a " run_training_epoch" $out 2>/dev/null | cut -d '|' -f4 | xargs)
+# find a line with 'training_avg_throughput ', split along '|' and xargs to remove whitespace
+training_avg_throughput=$(egrep -a "training_avg_throughput " $out 2>/dev/null | cut -d '|' -f4 | xargs)
+peak_gpu_mem_usage=$(egrep -a "Allocated memory " $out 2>/dev/null | cut -d '|' -f4 | xargs)
+peak_gpu_mem_usage="${peak_gpu_mem_usage// /}" #remove spaces e.g. 6202 MiB -> 6202MiB
+#peak_cpu_mem_usage="???"
+
+
+#fallbacks
+model=${model:-"transformer"}
+ens_size=${ens_size:-0}
+node_count=${node_count:-1} #fallback to 1
+mapper_chunks=${mapper_chunks:-4}
+proc_chunks=${proc_chunks:-2}
+launcher=${launcher:-"interactive"}
+start_time=${start_time:-"??"}
+end_time=${end_time:-"??"}
+
+#first we print, then we pass through awk to assure the columns align with header
+echo "$node_count,$gpu_count,$gpus_per_model,$batch_size,$batch_per_model,$ens_size,$num_channels,$model,$source_res,$hidden_res,$max_rollout,$job_name,$train_iter_per_epoch,$val_iter_per_epoch,$num_epochs,$num_workers,$mapper_chunks,$proc_chunks,$dataset,$graph,$launcher,$rundir,$success,$start_time,$end_time,$training_epoch_time_s,$training_avg_throughput,$peak_gpu_mem_usage" #|\
+	#awk '{printf("%9s %8s %12s %13s %17s %12s %11s %5s %9s %9ss %7s %7s %17s %15s %9s %9s %12s %10s %7s %5s %8s %6s %8s %18s %21s %10s %10s\n",\
+	#	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)}'
+#TEMPLATE to read more from run_cmd.txt
+#=$(egrep -a -o "[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+
+elif [[ $mode == "inference" ]]; then
+	function header()
+	{
+    	if [[ $hdrdone -eq 0 ]] ; then
+        	echo "DeviceCount,Output?,Checkpoint,Input,LeadTime,MapperChunks,ProcessorChunks,ParallelOutput,WritersPerDevice,rundir,Success?,StartTime,EndTime,PeakMem,Runtime"
+        	hdrdone=1
+    	fi
+	}
+	header
+
+	config=./inf.yaml
+	env=./env.txt
+	out=./out.txt
+	run_cmd=./run_cmd.txt
+
+	#=$(egrep -a -o "[a-zA-Z0-9._-]*" $run_cmd 2>/dev/null | cut -d '=' -f2 | xargs)
+	device_count=$(egrep -a -o "world_size: [a-zA-Z0-9._-]*" $config 2>/dev/null | cut -d ' ' -f2 | xargs) #TODO does this work w slurm/torchrun
+	grep -q "output: none" $config
+	output=$(( $? == 0 ? 1 : 0 ))
+	checkpoint=$(egrep -a "^checkpoint:" $config 2>/dev/null | cut -d ' ' -f2 | xargs -- basename )
+	input="???"
+	lead_time=$(egrep -a -o "lead_time: [a-zA-Z0-9._-]*" $config 2>/dev/null | cut -d ' ' -f2 | xargs)
+	mapper_chunks=$(egrep -a -o "num_mapper_chunks=[a-zA-Z0-9._-]*" $env 2>/dev/null | cut -d '=' -f2 | xargs)
+	processor_chunks=$(egrep -a -o "num_processor_chunks=[a-zA-Z0-9._-]*" $env 2>/dev/null | cut -d '=' -f2 | xargs)
+	parallel_output=$(egrep -a -o "parallel_output: [a-zA-Z0-9._-]*" $config 2>/dev/null | cut -d ':' -f2 | xargs)
+	writers_per_device=$(egrep -a -o "writers_per_device: [a-zA-Z0-9._-]*" $config 2>/dev/null | cut -d ':' -f2 | xargs)
+	rundir=$(basename $PWD)
+	success="???"
+	start_time=$(egrep -a "^Start time:" $out 2>/dev/null | cut -d ' ' -f3 | xargs)
+	end_time=$(egrep -a "^End time:" $out 2>/dev/null | cut -d ' ' -f3 | xargs)
+	peakMem=$(egrep -a "Allocated memory " $out 2>/dev/null | cut -d '|' -f4 | xargs)
+	runtime=$(egrep -a "Inference completed in :" $out 2>/dev/null | cut -d ':' -f4 | xargs) #TODO should convert to seconds
+
+	#fallbacks
+	
+
+	#print message
+	echo "$device_count,$output,$checkpoint,$input,$lead_time,$mapper_chunks,$processor_chunks,$parallel_output,$writers_per_device,$rundir,$success,$start_time,$end_time,$peakMem,$runtime"
+
+else
+echo "Unknown mode: '$mode'. exiting..."
+exit 0
+fi
+
+done

@@ -1,0 +1,363 @@
+#!/usr/bin/env bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+set -ex
+
+source $RAPS_AIFS_ROOT_DIR/.aifsenv 2>&1 > /dev/null
+
+env_type=$ENV_TYPE #set in arch_dir/env.sh
+#env_type=venv #python venv
+#env_type=hybrid_container #some libs installed in a container, other libs (ncluding anemoi srcs installed outside
+#env_type=full_container #Everything lives inside a container you built yourself
+
+function set_grid_path() {
+
+#move grids to build dir
+if [[ ! -d $RAPS_AIFS_BUILD_DIR/grids ]]; then
+cd  $RAPS_AIFS_BUILD_DIR
+cp $RAPS_AIFS_ROOT_DIR/etc/aifs/tarballs/grids.tar.gz .
+tar xvzf grids.tar.gz
+rm grids.tar.gz
+mv home/mlx/ai-ml/grids .
+rm -rf home
+cd -
+fi
+
+#update anemoi config to point to grids
+mkdir -p ~/.config/anemoi
+cat <<EOF > ~/.config/anemoi/settings.toml
+[utils]
+grids_path = "$RAPS_AIFS_BUILD_DIR/grids"
+EOF
+}
+
+#need to build the python module multiolib on aarch64 systems
+function build_multio() {
+	echo "Error. not yet implemented"
+	exit 1
+}
+
+function build_aarch64_deps_from_source(){
+#check if cmake is available
+#check if ecbundle is available
+
+	if [[ ! -d $RAPS_AIFS_BUILD_DIR/ecbundle ]]; then
+	ecbundle_version=2.2.2
+	git clone -b 2.2.2  https://github.com/ecmwf/ecbundle $RAPS_AIFS_BUILD_DIR/ecbundle
+	fi
+	export PATH=$RAPS_AIFS_BUILD_DIR/ecbundle/bin:$PATH
+	echo 'export PATH=$RAPS_AIFS_BUILD_DIR/ecbundle/bin:$PATH' >>  $RAPS_AIFS_ROOT_DIR/.aifsenv
+	#rm -rf $RAPS_AIFS_BUILD_DIR/aifs-bundle
+	mkdir -p $RAPS_AIFS_BUILD_DIR/aifs-bundle
+	rm -f $RAPS_AIFS_BUILD_DIR/aifs-bundle/bundle.yml
+	ln -s $RAPS_AIFS_ROOT_DIR/etc/aifs/bundle.yml $RAPS_AIFS_BUILD_DIR/aifs-bundle/bundle.yml
+	cd $RAPS_AIFS_BUILD_DIR/aifs-bundle
+	ecbundle create
+	ecbundle build
+	bash $RAPS_AIFS_BUILD_DIR/aifs-bundle/build/install.sh
+	cd -
+
+	#we need to get some grib templates so multio can decode the short names to the param ids
+	#these could be downloaded at runtime from internet
+	#but do it manually so it works offline too
+	mkdir -p ~/.cache/anemoi/
+	cd ~/.cache/anemoi/
+	cp $RAPS_AIFS_ROOT_DIR/etc/aifs/tarballs/grib.tar.gz .
+	tar xvzf grib.tar.gz
+	rm grib.tar.gz
+	cd -
+
+	cat <<EOT >> $RAPS_AIFS_ROOT_DIR/.aifsenv
+        #tell eccodes python bindings to use manually built eccodes
+        export ECCODES_PYTHON_USE_FINDLIBS=1
+        export ECCODES_DIR=$RAPS_AIFS_BUILD_DIR/aifs-bundle/install
+	#tell multio lib to use prebuilt multio lib
+	export FINDLIBS_DISABLE_PACKAGE=yes
+	export MULTIO_HOME=$RAPS_AIFS_BUILD_DIR/aifs-bundle/install
+	# env var which points to multio install dir, for historical reasons called IFS_INSTALL_DIR
+	export IFS_INSTALL_DIR=$RAPS_AIFS_BUILD_DIR/aifs-bundle/install 
+EOT
+}
+
+function build_eccodes() {
+	eccodes_version=2.41.0
+	eccodes_install_dir=$RAPS_AIFS_BUILD_DIR/eccodes/$eccodes_version
+	if [[ ! -f $eccodes_install_dir/lib64/libeccodes.so ]]; then
+	prevdir=$PWD
+	cd $SCRATCH/tmp
+	rm -rf eccodes-* #eccodes-${eccodes_version}-Source.tar.gz eccodes-${eccodes_version}-Source
+	wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-${eccodes_version}-Source.tar.gz
+	tar -xzf eccodes-${eccodes_version}-Source.tar.gz
+	cd eccodes-${eccodes_version}-Source
+	mkdir build
+	cd build
+	cmake .. -DCMAKE_INSTALL_PREFIX=$eccodes_install_dir
+	make -j
+	#ctest
+	make install
+	cat <<EOT >> $RAPS_AIFS_ROOT_DIR/.aifsenv
+	#tell eccodes python bindings to use manually built eccodes
+	export ECCODES_PYTHON_USE_FINDLIBS=1 
+	export ECCODES_DIR=$eccodes_install_dir
+EOT
+  cd $SCRATCH/tmp
+	rm -rf eccodes-${eccodes_version}-Source.tar.gz eccodes-${eccodes_version}-Source
+	cd $prevdir
+	fi
+}
+
+# TODO system specific info should tak optional bind list e.g. LUMI needs certain netowrking libs bound in
+# TODO if base container path isnt set, clone something from docker
+
+# requirements: apptainer or singularity
+setup_hybrid_container() {
+set -e
+
+container_cmd=""
+#check if apptainer or singularity are availible
+if command -v apptainer 2>&1 > /dev/null; then
+	echo "Apptainer was found"
+	container_cmd=apptainer
+elif command -v singularity 2>&1 > /dev/null; then
+	echo "Singularity was found"
+	container_cmd=singularity
+else
+	echo "Error. Neither Singularity nor apptainer commands could be found."
+	exit 1
+fi
+#echo "container_cmd='$container_cmd'" >> $env_file
+
+#read container path from input file and store in env file
+if [ $INPUT_HYBRID_CONTAINER_PATH ]; then
+	hybrid_container_path=$INPUT_HYBRID_CONTAINER_PATH
+	#echo "hybrid_container_path=$hybrid_container_path"	
+	rm -f $RAPS_AIFS_BUILD_DIR/hybrid_container.sif #delete symlink if it exists
+	ln -s $INPUT_HYBRID_CONTAINER_PATH $RAPS_AIFS_BUILD_DIR/hybrid_container.sif
+else
+	echo "error. 'INPUT_HYBRID_CONTAINER_PATH' not set"
+	exit 1
+fi
+
+#read hybrid container venv path from input file and store in env file
+if [ $INPUT_HYBRID_VENV_PATH != "" ]; then
+	mkdir -p $INPUT_HYBRID_VENV_PATH
+	hybrid_venv_path=$INPUT_HYBRID_VENV_PATH
+	echo "hybrid_venv_path=$hybrid_venv_path"	
+	rm -f $RAPS_AIFS_BUILD_DIR/hybrid_container_venv #delete symlink if it exists
+	ln -s $INPUT_HYBRID_VENV_PATH $RAPS_AIFS_BUILD_DIR/hybrid_container_venv 
+else
+	echo "error. 'INPUT_HYBRID_VENV_PATH' not set"
+	exit 1
+fi
+
+# TODO maybe I should change to passing these via 'apptainer --env X=y' instead of 'export APPTAINERENV_X=y' bc its easier to track
+export ${container_cmd^^}ENV_PATH=$hybrid_venv_path/bin:$PATH ${container_cmd^^}ENV_PYTHONUSERBASE=$hybrid_venv_path ${container_cmd^^}ENV_PYTHONPATH=$hybrid_venv_path
+
+#install_prefix="$container_cmd exec $hybrid_container_path"
+#echo "install_prefix='$install_prefix'" >> $env_file
+
+
+#On some systems we need to explicitly bind in extra libs, this env var gives a way to do that
+extra_bindings=""
+if [[ ! -z "$INPUT_HYBRID_CONTAINER_EXTRA_BINDS" ]]; then
+	extra_bindings=",$INPUT_HYBRID_CONTAINER_EXTRA_BINDS"
+fi
+
+mkdir -p $RAPS_AIFS_BUILD_DIR/bin
+#$container_cmd exec --env "PATH=$hybrid_venv_path/bin:$PATH,PYTHONUSERBASE=$hybrid_venv_path,PYTHONPATH=$hybrid_venv_path" --nv $hybrid_container_path \$@
+
+#e.g. lumi needs to activate a conda env when you enter the container
+container_activation_cmd=""
+if [ ! -z ${INPUT_HYBRID_CONTAINER_INIT_CMD+x} ]; then
+	container_activation_cmd="$INPUT_HYBRID_CONTAINER_INIT_CMD;"
+fi
+
+#TODO need some way to tell if system uses amd or nvidia gpus for '--nv'
+rm -rf $RAPS_AIFS_BUILD_DIR/bin/with-container
+cat <<EOT > $RAPS_AIFS_BUILD_DIR/bin/with-container
+#!/usr/bin/env bash
+$container_cmd exec --nv --bind $hybrid_venv_path,$RAPS_AIFS_ROOT_DIR${extra_bindings} --env "PATH=$hybrid_venv_path/bin:\$PATH,PYTHONUSERBASE=$hybrid_venv_path,PYTHONPATH=$hybrid_venv_path" $hybrid_container_path  bash -c "$container_activation_cmd \$*"
+EOT
+install_prefix="$RAPS_AIFS_BUILD_DIR/bin/with-container"
+
+chmod +x $RAPS_AIFS_BUILD_DIR/bin/with-container
+
+}
+
+setup_full_container() {
+	echo "Not Yet implemented"
+	exit 1
+}
+
+setup_venv() {
+#read  venv path from input file and store in env file
+if [ -z "$INPUT_VENV_PATH" ]; then
+        echo "error. 'INPUT_VENV_PATH' not set"
+        exit 1
+else
+        venv_path=$INPUT_VENV_PATH
+        echo "venv_path=$venv_path"
+fi
+
+#check python and venv is available
+#TODO fallback to python
+python_cmd="python3"
+command -v $python_cmd 2>&1 > /dev/null ||{
+	echo "Error. '$python_cmd' not found on path"
+	exit 1
+}
+
+$python_cmd -m venv -h 2>&1 > /dev/null ||{
+	echo "Error. 'venv' module for $python_cmd not found"
+	exit 1
+}
+
+
+python_version=$($python_cmd --version | awk '{print $2}' | sed 's/\.[0-9]\+$//')
+is_python_supported=$(echo $python_version'>='3.10 | bc -l)
+if [ $is_python_supported -eq 0 ]; then
+	echo "Error. Your python version was detected as $python_version"
+	echo "Versions < 3.10 weren't able to install anemoi-* using pyproject.toml"
+	echo "Please upgrade python to at least 3.10. exiting..."
+	exit 1
+fi
+
+#check if venv path exists, if not create it
+if [ ! -d $venv_path ]; then
+	echo "Creating a fresh venv in $venv_path"
+	$python_cmd -m venv $venv_path
+fi
+
+#create symlink to venv in build dir
+rm -f $RAPS_AIFS_BUILD_DIR/venv #delete symlink if it exist
+ln -s $venv_path $RAPS_AIFS_BUILD_DIR/venv
+
+venv_type=venv
+if [[ ! -f $RAPS_AIFS_BUILD_DIR/venv/bin/activate ]]; then
+       venv_type=conda
+fi
+if [[ $venv_type == "venv" ]]; then
+       source $RAPS_AIFS_BUILD_DIR/venv/bin/activate
+       echo "source $RAPS_AIFS_BUILD_DIR/venv/bin/activate" >> $RAPS_AIFS_ROOT_DIR/.aifsenv
+else
+       conda activate $RAPS_AIFS_BUILD_DIR
+       echo "conda activate $RAPS_AIFS_BUILD_DIR" >> $RAPS_AIFS_ROOT_DIR/.aifsenv
+fi
+
+install_prefix=""
+}
+
+
+if [ $env_type == "venv" ]; then
+	setup_venv
+elif [ $env_type == "hybrid_container" ]; then
+	setup_hybrid_container
+
+elif [ $env_type == "full_container" ]; then
+	setup_full_container
+
+else 
+	echo "Error. Unsupported env type. Please set 'env_type' to either 'venv', 'hybrid_container' or 'full_container'"
+	exit
+fi
+echo "export RAPS_AIFS_ENV_TYPE=$env_type" >> $RAPS_AIFS_ROOT_DIR/.aifsenv
+export RAPS_AIFS_ENV_TYPE=$env_type
+
+#echo "export PATH=$RAPS_AIFS_ROOT_DIR/bin:\$PATH" >> $RAPS_AIFS_ROOT_DIR/.aifsenv
+
+#Optionally, set a different pip cache dir
+# Can be useful on machines with limited quota
+pip_cache="--no-cache"
+if [ "$INPUT_PIP_CACHE_DIR" != "" ]; then
+	echo "Caching pip wheels in $INPUT_PIP_CACHE_DIR"
+	pip_cache="--cache-dir=$INPUT_PIP_CACHE_DIR"
+fi
+
+#if installing offline
+#OFFLINE_SRC_DIR points to a dir containing wheels and anemoi source code
+offline_cmd=""
+
+OFFLINE=0
+if [ "$RAPS_AIFS_OFFLINE_DIR" != "" ]; then
+	offline_cmd="--no-index --find-links $RAPS_AIFS_OFFLINE_DIR/wheels -r $RAPS_AIFS_OFFLINE_DIR/requirements.txt" 
+	OFFLINE=1
+fi
+
+pip_cmd="pip $pip_cache install $offline_cmd"
+
+#on newer versions of anemoi, you have to set the offline grid path like so
+set_grid_path
+
+#install editable versions of source code
+if [ "$env_type" != "full_container" ]; then
+	isa=`lscpu | grep "^Architecture:" | awk '{print $2}'`
+	if [[ $isa == 'aarch64' ]]; then
+		$install_prefix $pip_cmd "torch>=2.6.0" torchvision triton --index-url https://download.pytorch.org/whl/cu128
+		#pytorch trace profiling doesnt work on aarch64 with 'with_stack=True'
+		sed -i 's/with_stack=True/with_stack=False/g' $RAPS_AIFS_BUILD_DIR/sources/anemoi-core/training/src/anemoi/training/diagnostics/profilers.py
+	#check for amd gpu, if so install rocm-enabled torch
+	elif command -v rocm-smi 2>&1 >/dev/null; then
+		$install_prefix $pip_cmd "torch>=2.6.0" torchvision --index-url https://download.pytorch.org/whl/rocm6.3
+	fi
+
+	#install pinned version of anemoi-utils
+	#needed while itt380 is on commit - bb7a045 - some mlflow functionality was moved from utils to training in 0.4.29
+	$install_prefix $pip_cmd anemoi-utils==0.4.28  2>&1 > /dev/null
+
+	#Install models and training
+	if [[ -d $RAPS_AIFS_BUILD_DIR/sources/anemoi-core ]]; then
+		anemoi_models_dir=$RAPS_AIFS_BUILD_DIR/sources/anemoi-core/models
+		anemoi_training_dir=$RAPS_AIFS_BUILD_DIR/sources/anemoi-core/training
+	else
+		anemoi_models_dir=$RAPS_AIFS_BUILD_DIR/sources/anemoi-models/models
+		anemoi_training_dir=$RAPS_AIFS_BUILD_DIR/sources/anemoi-training/training
+	fi
+	cd $anemoi_models_dir
+	$install_prefix $pip_cmd -e . 2>&1 > /dev/null
+
+	cd $anemoi_training_dir
+	$install_prefix $pip_cmd -e . 2>&1 > /dev/null
+	$install_prefix $pip_cmd -e .[profile] 2>&1 > /dev/null
+
+	#Installing inference
+	cd $RAPS_AIFS_BUILD_DIR/sources/anemoi-inference
+	$install_prefix $pip_cmd -e . 2>&1 > /dev/null
+
+	#check if flash_attn is available
+	#if not try install it
+	$install_prefix pip list | grep "flash-attn\|flash_attn" ||{
+		echo "Flash-attn not found! will try install a prebuilt wheel from github"
+		OFFLINE=$OFFLINE $install_prefix $RAPS_AIFS_ROOT_DIR/bin/get-flash-attn -v 2.7.4.post1
+	}
+
+
+	#install pymultio
+	if [[ $isa == 'aarch64' ]]; then
+		echo "Multio backend not suported on aarch64 systems"
+		build_aarch64_deps_from_source
+		$install_prefix $pip_cmd pymultio==2.7.0.dev4 --pre allow --no-deps #no deps so we dont try take multiolib and fail
+	else
+		$install_prefix $pip_cmd pymultio==2.7.0.dev4 --pre allow
+	fi
+
+	#install anemoi inference multio-plugin
+	#TODO replace with git clone
+	if [[ ! -d  $RAPS_AIFS_BUILD_DIR/sources/anemoi-plugins-ecmwf ]]; then
+	anemoi_inf_multio_plugin_src_tar=$RAPS_AIFS_ROOT_DIR/etc/aifs/tarballs/anemoi-plugins-ecmwf.tar.gz
+	cp $anemoi_inf_multio_plugin_src_tar $RAPS_AIFS_BUILD_DIR/sources
+	cd  $RAPS_AIFS_BUILD_DIR/sources
+	tar xvzf anemoi-plugins-ecmwf.tar.gz
+	rm anemoi-plugins-ecmwf.tar.gz
+	cd -
+	fi
+	$install_prefix $pip_cmd  --no-deps  $RAPS_AIFS_BUILD_DIR/sources/anemoi-plugins-ecmwf/plugins/inference/multio
+
+fi
+

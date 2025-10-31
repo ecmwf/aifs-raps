@@ -1,0 +1,93 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# This program parses a given rundir and uploads the run to mlflow
+# It uses anemoi-training mlflow sync
+
+# For this we need to know
+#	dest server URL 
+#	is auth required? 
+# 	source dir, can find in rundir
+#	run id, can find in rundir
+#	experiment name (given in config.txt)
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+root_dir=${SCRIPT_DIR%/bin}
+
+source $root_dir/.aifsenv
+
+set -e
+
+if [[ $1 == "" ]]; then
+	echo "error! expected usage is ./bin/upload_to_mlflow <path/to/rundir> [experiment_name]"
+	echo "exiting..."
+	exit 1
+fi
+
+rundir=$1
+
+if [[ ! -d $rundir ]]; then
+	echo "Error! the given rundir '$rundir' can't be found. exiting..."
+	exit 1
+fi
+
+prefix=""
+if [[ $RAPS_AIFS_ENV_TYPE == "hybrid_container" ]]; then
+	prefix="$RAPS_AIFS_BUILD_DIR/bin/with-container"
+fi
+
+#check the mlflow import export package is installed
+$prefix pip list | grep -w mlflow_export_import 2>&1 > /dev/null ||{
+	echo "Error. the package 'mlflow_export_import' can't be found. Will try install it for you"
+	$prefix pip install git+https:///github.com/mlflow/mlflow-export-import/#egg=mlflow-export-import
+}
+
+try_login=1
+dest_server_url="https://mlflow.ecmwf.int"
+if [[ $try_login -eq 1 ]]; then
+	$prefix anemoi-training mlflow login --url $dest_server_url
+fi
+
+echo " +        -d $dest_server_url"
+
+is_auth_required=1
+auth_snippet=""
+if [[ $is_auth_required -eq 1 ]]; then
+	auth_snippet="-a"
+	echo " +        -a"
+fi
+
+source_dir="$rundir/train-outputs/logs/mlflow"
+if [[ ! -d $source_dir ]]; then
+	echo "Error! Mlflow source dir '$source_dir' cant be found in the expected location. exiting.."
+	exit 1
+fi
+echo " +        -s $source_dir"
+
+
+if [[ $2 == "" ]]; then
+experiment_name=`cat $rundir/config.txt | grep experiment_name | awk -F': ' '{print $2; exit}'`
+else
+experiment_name=$2
+fi
+echo " +        -e $experiment_name"
+
+run_id=`awk '$4 ~/Mlflow/ {print $7; exit}' $rundir/out.txt`
+echo " +        -r $run_id"
+
+final_cmd="$prefix anemoi-training mlflow sync -s $source_dir -r $run_id -d $dest_server_url -e $experiment_name $auth_snippet"
+if [ "$DRYRUN" == "1" ] || [ "$OFFLINE" == "1" ]; then
+	echo "dryrun given! otherwise would execute '$final_cmd'"	
+else
+	echo "	=>	$final_cmd"
+	$final_cmd
+fi
+
+exit 0

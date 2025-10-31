@@ -1,0 +1,13 @@
+module load intel impi hdf5 mkl
+module load python/3.11.5-gcc
+module load sqlite3/3.45.2-gcc #needed for inference
+
+#setup env
+export ENV_TYPE='venv'
+export INPUT_VENV_PATH="$SCRATCH/venvs/raps"
+
+#running
+export AIFS_DATA_PATH=/gpfs/scratch/ehpc01/ai-ml/datasets
+export AIFS_GRIDS_PATH=/gpfs/scratch/ehpc01/cobrien/grids
+export AIFS_OUTPUT_PATH=$SCRATCH/aifs/outputs/raps
+export AIFS_NUM_GPUS_PER_NODE=4

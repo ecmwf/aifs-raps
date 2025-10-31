@@ -1,0 +1,511 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+# Batch system independent script to run ECMWFs AIFS model
+#
+# Author: Cathal O'Brien (ECMWF) 13-Nov-2024 : Initial version
+
+set +x
+set -eua
+shopt -s extglob # enables extglob i.e. @(x|y|z) regular expressions in bash
+
+bashsrc=$(basename ${BASH_SOURCE})
+
+if [[ $BASH_VERSINFO -lt 4 ]] ; then
+    PS4='+ [${bashsrc}:${LINENO}]: '
+else # only v4 onwards supports the below one w/o silent deaths
+    _tref=$(date +%s)
+    PS4='+ [${bashsrc}:$(($(date +%s)-_tref))s:$(date +%T):${LINENO}]: '
+fi
+
+verbose=1
+function ver_echo
+{
+    if [[ $verbose -eq 1 ]] ; then
+        echo "$@"
+    fi
+}
+
+function preserve
+{
+    args=""
+    for x in "$@"
+    do
+	args="${args} $x"
+    done
+    echo $args
+    unset args x
+}
+
+t1=$(date +%s.%N)
+started=$(date -R) # must be with -R or date --date="$started" in jobinfo may occasionally fail
+
+errcnt=0
+launcher=${launcher:-""}
+
+cmddir=$(dirname $(which $0))
+cmd=$(basename $0)
+cmdargs=${*:-}
+
+pid=$$
+
+# Usage: model
+checkpoint=""          # -C|--checkpoint <checkpoint_path> # Path to checkpoint containing model weights
+date="20200101"			# -d|--date <datestring> # YYYYMMDD, currently just used to select date of dataset input
+device_count=1			# -D|--devices <int> #how many devices to run in parallel over, cant be more then num-gpus-per-node. to run over multiple nodes, use srun
+dryrun=0            # --dryrun          # just prints run config and quits
+dummy_input=0		# --dummy|--dummy-input	# genertae dummy inputs instead of reading inputs from agrib file
+gpus_per_node=1		# --gpus-per-node 
+input_path=""                # -I|--input|--input-path <input_file_path> # Input grib file, if unset, try fetch something off mars
+get_input=0		# --get-input		# if passed, just download input to rundir and then quit
+jobid=${pid}            # -j <jobid>        # Job ID
+jobname="jobname"       # -J <jobname>      # Job name
+lead_time=240           # -T|--lead-time # How many hours is forecast
+multio=0		# -M|--multio 	#enable MultIO for output (must have multio installed)
+nodes=1			# -N|--nodes # how mnay nodes to run over
+no_output=0          # --no-output # disables writing of output
+num_mapper_chunks=1        # --mapper-chunks <num_chunks> #how many chunks to use in the mappers, defaults to 1 or ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER
+num_processor_chunks=1        # --processor-chunks <num_chunks> #how many chunks to use in the processor, defaults to 1 or ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR
+use_nsys=0              # --nsys #if set, use nsys (or rocprof)
+output_path=""          # -O|--output-path <output_file_path> # Output grib file path, if unset output in rundir
+parallel_out=0		# -P|--parallel-out # if output and running across multiple devices, output will be sharded across devices and written in parallel
+profile=0	#-p|--profile #uses the profiler functionality of anemoi inference
+train_rundir=""		# --rundir <training rundir> # path to a rundir from a previous raps training run
+writers_per_device=0	# -w | --num-writers | --writers-per-device # how many processes a device will spawn to handle output
+# <filename>     # Filename of input zarr dataset
+#train_end_yyyymmdd=null
+#val_start_yyyymmdd=null
+#val_end_yyyymmdd=nulll
+# End usage
+
+lkey="checkpoint: "
+lkey="$lkey dryrun"
+lkey="$lkey dummy"
+lkey="$lkey dummy-input"
+lkey="$lkey gpus-per-node: "
+lkey="$lkey input-path: "
+lkey="$lkey input: "
+lkey="$lkey get-input "
+lkey="$lkey jobid: "
+lkey="$lkey jobname: "
+lkey="$lkey launcher: "
+lkey="$lkey lead-time: "
+lkey="$lkey mapper-chunks: "
+lkey="$lkey multio "
+lkey="$lkey no-output"
+lkey="$lkey nodes:"
+lkey="$lkey nsys "
+lkey="$lkey num-mapper-chunks: "
+lkey="$lkey num-processor-chunks: "
+lkey="$lkey num-writers: "
+lkey="$lkey output-path:"
+lkey="$lkey parallel-out"
+lkey="$lkey parallel-output"
+lkey="$lkey processor-chunks: "
+lkey="$lkey profile"
+lkey="$lkey rundir: "
+lkey="$lkey run-dir: "
+lkey="$lkey writers-per-device:"
+
+rkey=$(echo $lkey | perl -pe 's/-//g')
+
+LONG_FLAGS=""
+for lf in $(echo "$lkey $rkey" | perl -pe 's/\s+/\n/g'| sort -u)
+do
+    LONG_FLAGS="$LONG_FLAGS -l $lf"
+done
+
+FLAGS="1bC:d:D:e:f:FgG:h:H:I:i:j:J:kl:L:Mn:N:O:pPr:Rs:S:t:T:vuUx:w:W"
+
+OPTS=`getopt -o $FLAGS $LONG_FLAGS -- "$@"`
+
+if [[ $? -ne 0 ]] ; then
+    echo "${cmd}: (Error) Invalid or unsupported options from 'getopt'" >&2
+    exit 1
+fi
+
+trueargs=$(echo "$OPTS" | perl -pe "s/^\s+//; s/(--\S+)\s+'/\${1}=/g; s/'//g; s/--\s*$//")
+abort=no
+
+# Check if pigz -- a parallel gzip'per -- is found
+pigz=$(which pigz 2>/dev/null || echo "pigz")
+
+eval set -- "$OPTS"
+
+while true
+do
+    case "$1" in
+    -C|--checkpoint) checkpoint="$2"; shift 2;;
+    -d|--date) date=$2; shift 2;;
+    -D|--device-count) device_count=$2; shift 2;;
+    --dryrun) dryrun=1; shift;;
+    --dummy|--dummy-input) dummy_input=1; shift;;
+    --gpus-per-node) gpus_per_node=$2; shift 2;;
+    -I|--input|--input-path) input_path="$2"; shift 2;;
+    --get-input) get_input=1; shift;;
+    -j|--jobid) jobid="$2"; shift 2;;
+    -J|--jobname) jobname="$2"; shift 2;;
+    --launcher) launcher="$2"; shift 2;;
+    --mapper-chunks) num_mapper_chunks=$2; shift 2;;
+    -M|--multio) multio=1; shift;;
+    -T|--lead-time) lead_time=$2; shift 2;;
+    --no-output) no_output=1; shift;;
+    -N|--nodes) nodes=$2; shift 2;;
+    --nsys) use_nsys=1; shift;;
+    --num-mapper-chunks) num_mapper_chunks=$2; shift 2;;
+    --num-processor-chunks) num_processor_chunks=$2; shift 2;;
+    -O|--output-path) output_path="$2"; shift 2;;
+    -P|--parallel-out|--parallel-output) parallel_out=1; shift;;
+    --processor-chunks) num_processor_chunks=$2; shift 2;;
+    -p|--profile) profile=1; shift;;
+    --rundir|--run-dir) train_rundir="$2"; shift 2;;
+    -w|--num-writers|--writers-per-device) writers_per_device=$2; shift 2;;
+	--) shift; break;;
+	*) echo "DEBUG: 1=${1:-}"; echo "DEBUG: 2=${2:-}"; abort=yes; break;;
+    esac
+done
+
+if [[ $abort = yes ]] ; then
+    echo "${cmd}: (Error) Invalid command line arguments : $cmdargs" >&2
+    ((errcnt += 1))
+    exit 1
+fi
+
+set -eux
+
+cd $(dirname "$0")
+pwd
+
+# $OUTROOT = root directory where output files go -- normally defined in .again
+if [[ -z "${OUTROOT:-}" ]] ; then
+    echo "${cmd}: (Error) OUTROOT not defined" >&2
+    ((errcnt += 1))
+elif [[ ! -d "${OUTROOT}" ]] ; then
+    echo "${cmd}: (Warning) OUTROOT directory $OUTROOT not found -- creating ..." >&2
+    mkdir -p $OUTROOT || :
+    if [[ ! -d "${OUTROOT}" ]] ; then
+        echo "${cmd}: (Error) OUTROOT directory $OUTROOT could not be created" >&2
+        ((errcnt += 1))
+    fi
+fi
+
+runroot=$OUTROOT/$cmd/
+mkdir -p $runroot
+cd $runroot
+
+output_label="withOutput"
+if [[ $no_output -eq 1 ]]; then
+output_label="noOutput"
+elif [[ $multio == 1 ]]; then
+output_label="withMultio"
+#TODO move below once i rewrtie output section
+#module load intel/2021.4.0 #import multio requires libipifort.so
+fi
+
+if [[ ! $num_mapper_chunks == "0" ]]; then
+	echo "'--num-mapper-chunks=$num_mapper_chunks' set, setting mapper chunks to $num_mapper_chunks'"
+  export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=$num_mapper_chunks
+fi
+if [[ ! $num_processor_chunks == "0" ]]; then
+	echo "'--num-processor-chunks=$num_processor_chunks' set, setting processor chunks to $num_processor_chunks'"
+	export ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR=$num_processor_chunks
+fi
+#if not set, set to 1 so the rundir makes sense
+if [[ -z ${ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR+x} ]]; then
+	export ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR=1
+fi
+if [[ -z ${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER+x} ]]; then
+	export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=1
+fi
+
+if [[ -n ${SLURM_NNODES+x} ]]; then
+	nodes=$SLURM_NNODES
+fi
+if [[ -n ${SLURM_NTASKS_PER_NODE+x} ]]; then
+	gpus_per_node=$SLURM_NTASKS_PER_NODE
+fi
+
+input_label=gribInput
+if [[ $dummy_input == 1 ]]; then
+	input_label=dummyInput
+fi
+
+cutjobid=$(echo "$jobid" | cut -d. -f1)
+rundir=$(pwd)/${nodes}N_${gpus_per_node}gpn_${lead_time}hrs_${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER}mchunks_${ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR}pchunks_${input_label}_$output_label.${jobname}-${cutjobid}
+ver_echo "rundir=$rundir"
+rm -rf $rundir
+mkdir -p $rundir
+cd $rundir
+
+default_output_path=$rundir/aifs_out.grib
+
+config=$rundir/inf.yaml
+touch $config
+
+cat <<EOT >> $config
+runner: parallel
+world_size: $device_count
+EOT
+
+
+#configure parallel output and num writers per device
+if [[ $parallel_out -eq 1 ]]; then
+cat <<EOT >> $config
+parallel_output: True
+EOT
+else
+cat <<EOT >> $config
+parallel_output: False
+EOT
+fi
+
+cat <<EOT >> $config
+writers_per_device: $writers_per_device
+EOT
+
+
+output_cmd="--output=file --path=$default_output_path"
+if  [[ $no_output -eq 1 ]] ; then
+cat <<EOT >> $config
+output: none
+EOT
+elif [[ $output_path != "" ]]; then
+    output_cmd="--output=file --path=$output_path"
+	ver_echo "Writing inference output to $output_path"
+
+if [[ $multio == 1 ]]; then
+
+cat <<EOT >> $config
+output:
+  multio.grib:
+    path: '$output_path'
+    type: 'fc'
+    klass: 'ai'
+    expver: '0001'
+    model: 'aifs-single'
+    stream: 'oper'
+    #per-server: true
+EOT
+else
+#this command expands the env vars in templates.yaml
+#the templates.yaml file tells anemoi how to write the grib files
+envsubst < $RAPS_AIFS_ROOT_DIR/etc/aifs/inf/grib-templates/templates.yaml > $rundir/grib_templates.yaml
+cat <<EOT >> $config
+output:
+  grib: 
+    path: $output_path
+    templates:
+      - samples:
+          index_path: $rundir/grib_templates.yaml
+EOT
+fi
+else
+
+if [[ $multio == 1 ]]; then
+cat <<EOT >> $config
+output:
+  multio.grib:
+    path: '$default_output_path'
+    type: 'fc'
+    klass: 'ai'
+    expver: '0001'
+    model: 'aifs-single'
+    stream: 'oper'
+    #per-server: true
+EOT
+else
+#default output path
+#this command expands the env vars in templates.yaml
+#the templates.yaml file tells anemoi how to write the grib files
+envsubst < $RAPS_AIFS_ROOT_DIR/etc/aifs/inf/grib-templates/templates.yaml > $rundir/grib_templates.yaml
+cat <<EOT >> $config
+output:
+  grib:
+    path: $default_output_path
+    templates:
+      - samples:
+          index_path: $rundir/grib_templates.yaml
+EOT
+fi
+fi
+
+
+#check if a checkpoint has been given
+#if not, check a given training rundir for a checkpoint
+if  [[ $checkpoint == "" ]] ; then
+	if [[ $train_rundir == "" ]]; then
+		echo "Error. no checkpoint or training rundir provided. Exiting..."
+		echo "Rerun with '--checkpoint=' or '--rundir='"
+		exit 1
+	else
+		echo "no checkpoint given via --checkpoint. checking $train_rundir"
+		if [[ ! -f $train_rundir/inference-last.ckpt ]]; then
+			echo "Error. inference-last.checkpoint not found in $train_rundir"
+			run_id=`awk '/INFO Adding extra information to checkpoint/ {match($0, /\/([^/]+)\/[^/]+$/, arr); print arr[1]; exit}' $train_rundir/out.txt`
+			echo "Checking $train_rundir/train-outputs/checkpoint/${run_id}"
+			if [[ ! -f $train_rundir/train-outputs/checkpoint/${run_id}/inference-last.ckpt ]]; then
+				echo "Error. Can't find a checkpoint in $train_rundir. exiting..."
+				exit 1
+			else
+				checkpoint="$train_rundir/train-outputs/checkpoint/${run_id}/inference-last.ckpt"
+			fi
+		else
+			checkpoint="$train_rundir/inference-last.ckpt"
+		fi
+	fi
+elif [[ ! -f $checkpoint ]]; then
+#check if the given checkpoint exists
+		echo "Error. The given checkpoint at $checkpoint does not exist. exiting..."
+		exit 1
+fi
+echo "using $checkpoint as checkpoint"
+echo "checkpoint: $checkpoint" >> $config
+
+# check if checkpoint is larger then 2G, if so fix it
+ckpt_size=`du -sh $checkpoint | awk '{print $1}'` #e.g. 3.2G, 4.0M
+unit=${ckpt_size:-1} # e.g. 'G'
+num=${ckpt_size::-1} # e.g. '3.2'
+if [[ $unit == "G" ]]; then
+larger=$(echo $num'>='2.0 | bc -l |echo 1)
+if [[ $larger -eq 1 ]]; then
+	echo "'$checkpoint' larger then 2.0G ($ckpt_size), fixing..."
+	$RAPS_AIFS_ROOT_DIR/bin/fix_aifs_checkpoint $checkpoint
+fi
+fi
+
+if [[ $dummy_input == 0 ]]; then
+if  [[ $input_path == "" ]] || [[ $get_input -eq 1 ]]; then
+    #echo "Error. no input file provided. exiting..."
+    echo "No input provided. will try fetch from mars"
+    start_time=12
+    ai-models anemoi --retrieve-request --lead-time $lead_time \
+	    --date=$date --time=$start_time \
+	    --checkpoint=$checkpoint 2>&1 | tee $rundir/marsReq_anemoi_${date}_${start_time}_${lead_time}.txt
+    #check if mars is availible #TODO also check if you are logged in
+    sed -i '/warn/d' $rundir/marsReq_anemoi_${date}_${start_time}_${lead_time}.txt #remove lines with 'warn'
+    sed -i '/Warn/d' $rundir/marsReq_anemoi_${date}_${start_time}_${lead_time}.txt #remove lines with 'Warn'
+    if [[ ! -x "$(command -v mars)" ]]; then
+	    echo "Can't fetch input data. 'mars' bin not found. Please provide input data manually with --input=/path/to/input.grib"
+	    exit 1
+    fi
+    mars $rundir/marsReq_anemoi_${date}_${start_time}_${lead_time}.txt #TODO add some error checking to fail if mars does not exist
+    mv input.grib $rundir/aifs_input.grib
+    input_path=$rundir/aifs_input.grib
+    input_cmd="--input file --file=$input_path"
+
+    if [[ $get_input -eq 1 ]]; then
+	echo "'--get-input' passed. Saving 'aifs_input.grib' to $rundir and exiting..."
+	exit
+    fi
+
+    #exit 1
+else
+#check if it exists
+	#input path can be a file 'input.grib' or a dataset '4km.zarr' 	
+	if [[ ! -f $input_path ]] && [[ ! -d $input_path ]]; then
+		echo "Error. The given input at $input_path does not exist. exiting..."
+		exit 1
+	fi
+    ver_echo "reading input from $input_path"
+fi
+fi
+
+#check if input is a zarr dataset
+dataset_input=0
+if [[ $input_path == *.zarr ]]; then
+dataset_input=1
+fi
+
+if [[ $dummy_input == 1 ]]; then
+echo "using dummy input"
+cat <<EOT >> $config
+input: dummy
+EOT
+elif [[ $dataset_input == 1 ]]; then
+echo "Using dataset '$input_path' (date: $date) as input"
+cat <<EOT >> $config
+input: 
+  dataset:
+    dataset: $input_path
+date: $date
+EOT
+else
+cat <<EOT >> $config
+input:
+  grib:
+    path: $input_path
+EOT
+fi
+
+nsys_cmd=""
+if [ $use_nsys -eq 1 ]; then
+        #check if nsys can be found
+        $prefix command -v nsys 2>&1 > /dev/null ||{
+                echo "error. nsight profiling was requested but the nsys binary can't be found. exiting..."
+                exit 1
+        }
+        mkdir -p $rundir/nsys
+        if [ ! -z ${SLURM_PROCID+x}]; then
+                #ensures different slurm procs dont clash
+                nsys_output=$rundir/nsys/out.%q{SLURM_PROCID}
+        else
+                #TODO should only profile rank 0 to ensure no clashes
+                nsys_output=$rundir/nsys/out
+                nsys_cmd="--gpu-metrics-device=0"
+        fi
+        nsys_cmd="nsys profile -s none -w true -t cuda,nvtx,osrt,cudnn,cublas,cusparse,openmp -o $nsys_output -f true --cudabacktrace=true --osrt-threshold=10000 -x true ${nsys_cmd}"
+fi
+
+if [[ $profile -eq 1 ]]; then
+echo "--profile passed, Using anemoi inference profiler..."
+cat << EOT >> $config
+use_profiler: true
+EOT
+fi
+
+if [[ ${launcher} == "srun" ]]; then
+        launcher="${launcher} --nodes=$SLURM_NNODES -n $SLURM_NTASKS --cpus-per-task=$SLURM_CPUS_PER_TASK --ntasks-per-node=$SLURM_NTASKS_PER_NODE --gpus-per-node=$SLURM_NTASKS_PER_NODE -K1 "
+        #launcher="${launcher} --nodes=$nodes -n $tasks --cpus-per-task=$SLURM_CPUS_PER_TASK --ntasks-per-node=$gpus_per_node --gpus-per-node=$gpus_per_node "
+	if [[ "$device_count" -gt 1 ]]; then
+		echo "Warning. When launching with slurm, '-D $device_count' will be ignored, and '\$SLURM_NTASKS' will be used to determine the number of parallel processes"
+	fi
+elif [[ ${launcher} == "torchrun" ]]; then
+        launcher="${launcher} --no-python --nproc-per-node=$device_count "
+fi
+
+echo "lead_time: $lead_time" >> $config
+
+run_cmd="$launcher $nsys_cmd anemoi-inference run $config"
+
+cp $RAPS_AIFS_BUILD_DIR/sources/versions.txt $rundir ||{
+                echo "$RAPS_AIFS_BUILD_DIR/sources/versions.txt not found. Not copying to rundir"
+		pip list >  $rundir/versions.txt
+        }
+
+ver_echo "Saving NCCL debug info to $rundir/logs/nccl"
+mkdir -p $rundir/logs
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=INIT,BOOTSTRAP,ENV,NET,GRAPH,TUNING,ALLOC,CALL,NVLS,REG,PROFILE,RAS #everything but COLL and P2P, which are quite verbose
+export NCCL_DEBUG_FILE=$rundir/logs/nccl.%h.%p
+
+printenv | tee $rundir/env.txt
+
+
+echo $run_cmd > $rundir/run_cmd.txt
+
+start_time=$(date +%s)
+echo "Start time: $start_time"  | tee $rundir/out.txt
+
+$run_cmd 2>&1 | tee -a $rundir/out.txt
+
+end_time=$(date +%s)
+echo "End time: $end_time"  | tee -a $rundir/out.txt
+
+echo "files outputted to $rundir"

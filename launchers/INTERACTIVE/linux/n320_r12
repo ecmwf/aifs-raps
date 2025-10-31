@@ -1,0 +1,35 @@
+#!/bin/bash
+
+cd $(dirname "$0")
+pwd
+
+set -eu
+source ../../../.aifsenv
+
+printenv
+
+train_end_yyyymmdd=202010
+val_start_yyyymmdd=202011
+val_end_yyyymmdd=202012
+
+num_channels=256
+num_gpus=1
+num_nodes=1
+num_gpus_per_model=1
+
+dataset=aifs-ea-an-oper-0001-mars-n320-2020-2020-6h-v4.zarr
+
+jobid=$$
+jobname=aifs_n320
+host=${RAPS_SYSTEM:-""}
+hydra_args="training.rollout.start=12 training.rollout.max=12"
+
+$RAPS_AIFS_ROOT_DIR/bin/train \
+    -j "$jobid" -J "$jobname" \
+    --num-nodes="$num_nodes" --num-gpus="$num_gpus" \
+    --train-batch-limit=30 --val-batch-limit=10 --max-epochs=1 \
+    --train-end=$train_end_yyyymmdd --val-start=$val_start_yyyymmdd --val-end=$val_end_yyyymmdd \
+    --num-gpus-per-model="$num_gpus_per_model" -C "$num_channels" --debug \
+    --dataset="$dataset" --interactive --num-workers=6 --model='graphtransformer' --hydra-args="$hydra_args" "$@"
+
+exit $?

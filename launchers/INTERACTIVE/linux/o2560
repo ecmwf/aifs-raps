@@ -1,0 +1,52 @@
+#!/bin/bash
+
+pwd
+printenv | fgrep SLURM
+
+cloned=0
+
+cd $SLURM_SUBMIT_DIR
+pwd
+
+source ../../../.aifsenv
+
+set -eux
+
+train_end_yyyymmdd=20230906
+val_start_yyyymmdd=20230906
+val_end_yyyymmdd=20230907
+
+num_channels=256
+num_nodes=$SLURM_NNODES
+num_gpus=$((AIFS_NUM_GPUS_PER_NODE * SLURM_NNODES))
+num_gpus_per_model=4
+ens_size=0
+res=o2560
+hydra_args="data=zarr_no_insolation"
+
+dataset=4km-2years.zarr
+export CLONED_DATASET=1
+
+mapper_chunks=16 #32 for 1N
+proc_chunks=4 #8 for 1N
+num_workers=4 #6 for 1N
+
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export ANEMOI_BASE_SEED=42
+export CLONED_DATASET=1
+
+jobid=$$
+jobname=$SLURM_JOB_NAME
+
+$RAPS_AIFS_ROOT_DIR/bin/train \
+    --train-end=$train_end_yyyymmdd --val-start=$val_start_yyyymmdd --val-end=$val_end_yyyymmdd \
+    --train-batch-limit=200 --val-batch-limit=0 --max-epochs=1 \
+    --num-nodes="$num_nodes" --num-gpus="$num_gpus" --num-workers=$num_workers \
+    --num-gpus-per-model="$num_gpus_per_model" -C "$num_channels" \
+    --dataset="$dataset" --res="$res" \
+    --model="transformer" --hidden-res="o256"  --ens=$ens_size \
+    --num-mapper-chunks=$mapper_chunks --num-processor-chunks=$proc_chunks \
+    --hydra-args="$hydra_args" "$@"
+
+exit $?

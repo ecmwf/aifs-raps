@@ -1,0 +1,16 @@
+module load python3/3.12.9-01 cuda/12.9   cmake/3.31.6 aec gcc/15.1.0 nvidia/25.5
+#need nvidia for nsys
+#need gcc/15 for new enough GLIBCXX for flash_attn
+#need cmake to build inference deps
+
+#export CC=nvcc FC=nvfortran CXX=nvcc #breaks torch compile lol
+export LD_LIBRARY_PATH=/usr/local/apps/gcc/15.1.0/lib64/:$LD_LIBRARY_PATH
+
+# 2. setup_env
+export ENV_TYPE='venv'
+export INPUT_VENV_PATH='/lus/h1aiws01/naco/venvs/aifs-raps-ag'
+
+# 3. running
+export AIFS_DATA_PATH=/home/mlx/ai-ml/datasets
+export AIFS_OUTPUT_PATH=$SCRATCH/aifs/outputs/aifs-raps
+export AIFS_NUM_GPUS_PER_NODE=4

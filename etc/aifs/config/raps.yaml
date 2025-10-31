@@ -1,0 +1,114 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+defaults:
+  - hardware: slurm
+  - data: zarr
+  - dataloader: native_grid
+  - datamodule: single
+  - model: transformer
+  - graph: encoder_decoder_only
+  - training: default
+  - diagnostics: evaluation
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
+
+hydra:
+  job:
+    chdir: True
+  output_subdir: null #disable outputs/date/date/.hydra from being made in cwd
+
+config_validation: False
+
+dataloader:
+  prefetch_factor: 1
+  limit_batches:
+    validation: 0
+  batch_size:
+    training: 1
+    validation: 1
+hardware:
+  paths:
+    data: ${oc.env:AIFS_DATA_PATH}
+  files:
+    graph: raps.graph
+  num_gpus_per_node: ${oc.decode:${oc.env:AIFS_NUM_GPUS_PER_NODE}}
+  num_nodes: ${oc.decode:${oc.env:AIFS_NUM_NODES}}
+data:
+  resolution: n320
+graph:
+  nodes: #hidden res o96 for the transformer model
+    hidden:
+      node_builder: 
+        grid: o96
+diagnostics:
+  print_memory_summary: true
+  benchmark_profiler:
+    memory:
+      steps: 20
+      trace_rank0_only: true
+    time:
+      verbose: true
+    system:
+      enabled: false
+    model_summary: #bugged on itt380
+      enabled: false
+  log:
+    wandb:
+      entity: "" #fill gaps in config to appease pydantic
+    mlflow: #log offline every 50 steps
+      enabled: true
+      offline: True
+      tracking_uri: "" #fill gaps in config to appease pydantic
+      system: false
+    interval: 50
+  plot: #disable plotting
+    callbacks: []
+training: #disable sanity checking at the start of training
+  num_sanity_val_steps: 0
+  precision: bf16-fp32-opt
+model: #transformer only
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  processor:
+    window_size: 1140
+  encoder:
+    shard_strategy: 'edges'
+  decoder:
+    shard_strategy: 'edges'
+  layer_kernels:
+    QueryNorm:
+      _target_:  anemoi.models.layers.normalization.CompiledLayerNorm
+      _parital_: True
+    KeyNorm:
+      _target_:  anemoi.models.layers.normalization.CompiledLayerNorm
+      _parital_: True
+    LayerNorm:
+      _target_: "torch.nn.LayerNorm" #the default PyTorch implementation
+            #_target_: "liger_kernel.transformers.LigerRMSNorm"
+      _partial_: True
+      #Any arguments to your chosen function go here e.g.
+      #bias: False
+    Linear:
+      _target_: "torch.nn.Linear"
+      _partial_: True

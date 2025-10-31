@@ -1,0 +1,31 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+#In anemoi v3.0 and under theres an error with checkpoints larger then 2GB
+# this script fixes the checkpoint file
+
+if [[ $1 == "" ]]; then
+	echo "error! expected usage './bin/fix_ckpt </path/to/checkpoint>' exiting..."
+	exit 1
+fi
+
+set -xe
+checkpoint=$1
+echo "Cleaning $checkpoint..."
+file_name="ai-models.json"
+file_zip_path=`unzip -l $checkpoint | grep $file_name | awk '{print $NF}'`
+parent_dirs=`dirname $file_zip_path`
+unzip -j $checkpoint $file_zip_path 2>&1 > /dev/null #copy the json out of the zip
+mkdir -p $parent_dirs
+mv $file_name $parent_dirs
+zip -d $checkpoint $file_zip_path 2>&1 > /dev/null #delete the json inside the zip
+zip $checkpoint $file_zip_path 2>&1 > /dev/null #update the path
+unzip -l $checkpoint | grep $file_name #check if worked by printing the copies path within the zip
+rm -rf $file_zip_path

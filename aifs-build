@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+command_exists () { type "$1" &> /dev/null ; }
+
+#root_dir="$(dirname ` cd $( dirname "${BASH_SOURCE[0]}" ) && pwd -P` )" #for root/bin/aifs_build
+root_dir="$( cd $( dirname "${BASH_SOURCE[0]}" ) && pwd -P )" #for root/aifs_build
+
+# Usage: model
+arch_dir=""     # -a|--arch|--arch-dir <path to arch dir>
+clean=0		    # --clean 		#if set, delete build dir and .aifsenv
+build_dir=""	# -b|--build|--build-dir <path to build dir>
+offline=0 	    # -o|--offline|--offline-dir <path to offline dir> #optional dir containing wheels and aifs src. if passed, try do an offline install.
+# End usage
+
+
+lkey="arch-dir: "
+lkey="$lkey arch: "
+lkey="$lkey clean "
+lkey="$lkey build-dir: "
+lkey="$lkey offline-dir: "
+lkey="$lkey offline: "
+
+rkey=$(echo $lkey | perl -pe 's/-//g')
+
+LONG_FLAGS=""
+for lf in $(echo "$lkey $rkey" | perl -pe 's/\s+/\n/g'| sort -u)
+do
+    LONG_FLAGS="$LONG_FLAGS -l $lf"
+done
+
+FLAGS="a:b:o:"
+
+OPTS=`getopt -o $FLAGS $LONG_FLAGS -- "$@"`
+
+if [[ $? -ne 0 ]] ; then
+    echo "${cmd}: (Error) Invalid or unsupported options from 'getopt'" >&2
+    exit 1
+fi
+
+trueargs=$(echo "$OPTS" | perl -pe "s/^\s+//; s/(--\S+)\s+'/\${1}=/g; s/'//g; s/--\s*$//")
+abort=no
+
+# Check if pigz -- a parallel gzip'per -- is found
+pigz=$(which pigz 2>/dev/null || echo "pigz")
+
+eval set -- "$OPTS"
+
+while true
+do
+    case "$1" in
+    -a|--arch|--arch-dir) arch_dir=$2; shift 2;;
+    -b|--build|--build-dir) build_dir=$2; shift 2;;
+    --clean) clean=1; shift ;; 
+    -o|--offline|--offline-dir) offline=1; offline_dir=$2; shift 2;;
+        --) shift; break;;
+        *) echo "DEBUG: 1=${1:-}"; echo "DEBUG: 2=${2:-}"; abort=yes; break;;
+    esac
+done
+
+if [[ $abort = yes ]] ; then
+    echo "${cmd}: (Error) Invalid command line arguments : $cmdargs" >&2
+    ((errcnt += 1))
+fi
+
+if [[ $arch_dir == "" ]]; then
+	echo "Error. 'arch_dir' not set. please rerun with '--arch <path_to_arch_dir>'"
+	exit 1
+fi
+
+if [[ $build_dir == "" ]]; then
+	echo "Error. 'build_dir' not set. please rerun with '--build-dir <path_to_build_dir>'"
+	exit 1
+fi
+
+if [[ $offline -eq 1 ]] && [[ $offline_dir == "" ]]; then
+	echo "Error. Offline install requested but no source dir provided"
+	echo "Please rerun with --offline <path-to-offline-src>"
+	exit 1
+fi
+
+set -eu
+set -o pipefail
+
+
+if [[ $clean -eq 1 ]]; then
+	echo "--clean set. deleting $build_dir and $root_dir/.aifsenv"
+	rm -rf $build_dir
+	rm -rf $root_dir/.aifsenv
+fi
+
+export RAPS_AIFS_BUILD_DIR=`readlink -f $build_dir`
+export RAPS_AIFS_ROOT_DIR=$root_dir
+export RAPS_AIFS_ARCH_DIR=`readlink -f $arch_dir`
+
+mkdir -p $RAPS_AIFS_BUILD_DIR
+
+if [[ $offline -eq 1 ]]; then
+
+	workdir=$TMPDIR/import_workdir
+	if [[ "$TMPDIR" == "" ]]; then
+		workdir=$RAPS_AIFS_BUILD_DIR/import_workdir
+	fi
+	mkdir -p $workdir 
+	echo "Extracting offline RAPS build from '$offline_dir' to '$workdir'..."
+	tar xvzf $offline_dir -C $workdir 2>&1 > /dev/null || {
+		echo "Error. don't have write perms to $workdir"
+		echo "Please rerun with a different \$TMPDIR"
+		echo "e.g. 'TMPDIR=\$SCRATCH/tmp ./aifs-build --offline ...'"
+		echo "exiting..."
+		exit 1
+	}
+	export RAPS_AIFS_OFFLINE_DIR=`readlink -f $workdir`
+fi
+
+source $arch_dir/aifs_env.sh 2>&1 > /dev/null
+echo "source $RAPS_AIFS_ARCH_DIR/aifs_env.sh" > $root_dir/.aifsenv
+echo "export RAPS_AIFS_BUILD_DIR=$RAPS_AIFS_BUILD_DIR" >> $root_dir/.aifsenv
+echo "export RAPS_AIFS_ROOT_DIR=$RAPS_AIFS_ROOT_DIR" >> $root_dir/.aifsenv
+echo "export PATH=$RAPS_AIFS_ROOT_DIR/bin:\$PATH" >> $root_dir/.aifsenv
+
+#ensure there is a trailing slash
+echo "export OUTROOT=$AIFS_OUTPUT_PATH/" >> $root_dir/.aifsenv
+
+# 1. get sources
+touch $RAPS_AIFS_BUILD_DIR/build.log
+./bin/get_aifs_srcs 2>&1 | tee $RAPS_AIFS_BUILD_DIR/build.log 
+
+# 2. setup env
+# which mode of env (venv, hybrid container, full container) is defined in $arch_dir/env.sh
+./bin/setup_aifs_env  2>&1 | tee $RAPS_AIFS_BUILD_DIR/build.log
+
+#clean workdir if installing offline
+if [[ $offline -eq 1 ]]; then
+	rm -rf $workdir
+fi
+
+echo "RAPS-AIFS installed succesfully into $RAPS_AIFS_BUILD_DIR"
+echo "Now you can run AIFS using the scripts in launchers/"
+
+exit 0
+

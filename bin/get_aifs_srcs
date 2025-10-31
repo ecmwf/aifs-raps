@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+set -e
+
+function ver_echo {
+	if [[ $VERBOSE -eq 1 ]]; then
+		echo "verbose: $@"
+	fi
+}
+
+function get_src {
+	name=$1
+	branch=$2
+	src_dir=$3
+
+	if [ ! -d "$src_dir" ]; then
+        	echo "fetching $name ($branch)..."
+		#by default, fetch a tar of a release
+		#give an option to download a tarball
+		repo="anemoi-core"
+		if [ $name == "anemoi-inference" ]; then
+			repo="anemoi-inference"
+		fi
+		git_owner="ecmwf"
+		git_root="https://github.com/"
+		if [[ $CLONE_VIA_SSH ]]; then
+			git_root="git@github.com:"
+		fi
+		ver_echo "cloning from git with $git_root..."
+
+                git clone -b $branch ${git_root}${git_owner}/${repo}.git $src_dir >/dev/null
+        	echo "$name: branch $branch from ${git_root}${git_owner}/${repo}.git" >> $RAPS_AIFS_BUILD_DIR/sources/versions.txt
+
+		if [ $name == 'anemoi-models' ]; then
+			rm -rf $src_dir/training
+		elif [ $name == 'anemoi-training' ]; then
+			rm -rf $src_dir/models
+		fi
+        else
+                echo "Using existing $src_dir for $name"
+        fi
+}
+
+SRC_DIR=$RAPS_AIFS_BUILD_DIR/sources
+mkdir -p $SRC_DIR
+ver_echo "cloning repos into $SRC_DIR"
+anemoi_training_branch='itt380'
+anemoi_models_branch='itt380'
+get_anemoi_core=0
+if [[ $anemoi_training_branch == $anemoi_models_branch ]]; then
+	get_anemoi_core=1
+fi
+anemoi_inference_branch='feature/parallelOutput'
+
+anemoi_training_src_dir=$SRC_DIR/anemoi-training
+anemoi_models_src_dir=$SRC_DIR/anemoi-models
+if [[ $get_anemoi_core == 1 ]]; then
+	anemoi_training_src_dir=$SRC_DIR/anemoi-core
+	anemoi_models_src_dir=$SRC_DIR/anemoi-core
+fi
+anemoi_inference_src_dir=$SRC_DIR/anemoi-inference
+
+rm -f $RAPS_AIFS_BUILD_DIR/sources/versions.txt
+touch $RAPS_AIFS_BUILD_DIR/sources/versions.txt
+
+if [ "$RAPS_AIFS_OFFLINE_DIR" != "" ]; then
+	echo "Copying offline sources from $RAPS_AIFS_OFFLINE_DIR/sources to $RAPS_AIFS_BUILD_DIR/sources"
+	#only unpack sources if needed doesnt exist
+	if [ ! -d $RAPS_AIFS_OFFLINE_DIR/sources ]; then
+		cd $RAPS_AIFS_OFFLINE_DIR
+		tar xvzf sources.tar.gz  #-C $RAPS_AIFS_OFFLINE_DIR
+		cd -
+	fi
+
+	for filepath in $RAPS_AIFS_OFFLINE_DIR/sources/*; do
+		filename=$(basename "$filepath")
+		if [ -f $RAPS_AIFS_BUILD_DIR/sources/$filename ] || [ -d $RAPS_AIFS_BUILD_DIR/sources/$filename ]; then
+			echo "$filename already present in $RAPS_AIFS_BUILD_DIR. Not overwriting.."
+		else
+			cp -r $RAPS_AIFS_OFFLINE_DIR/sources/$filename $RAPS_AIFS_BUILD_DIR/sources
+		fi
+	done
+else
+	
+	#get training and models
+	if [[ $get_anemoi_core == 1 ]]; then
+		get_src 'anemoi-core' $anemoi_training_branch $anemoi_training_src_dir
+	else
+		get_src 'anemoi-models' $anemoi_models_branch $anemoi_models_src_dir
+		get_src 'anemoi-training' $anemoi_training_branch $anemoi_training_src_dir
+	fi
+
+	#get inference
+	get_src 'anemoi-inference' $anemoi_inference_branch $anemoi_inference_src_dir
+
+fi
+
+#link the training/config dir in builddir and add the raps config to it
+rm -rf $RAPS_AIFS_BUILD_DIR/config
+echo "symlinking $anemoi_training_src_dir/src/anemoi/training/config as $RAPS_AIFS_BUILD_DIR/config"
+ln -s $anemoi_training_src_dir/training/src/anemoi/training/config $RAPS_AIFS_BUILD_DIR
+#make a symlink to raps.yaml inside config so all the config files are together
+echo "Symlinking $RAPS_AIFS_ROOT_DIR/etc/aifs/raps.yaml as $anemoi_training_src_dir/src/aifs/training/config/raps.yaml"
+#TODO automate these symlinks
+rm -f $RAPS_AIFS_BUILD_DIR/config/raps.yaml
+rm -f $RAPS_AIFS_BUILD_DIR/config/data/zarr_no_insolation.yaml
+rm -f $RAPS_AIFS_BUILD_DIR/config/training/less_memory_loss_ensemble.yaml
+ln -s $RAPS_AIFS_ROOT_DIR/etc/aifs/config/raps.yaml $RAPS_AIFS_BUILD_DIR/config/
+ln -s $RAPS_AIFS_ROOT_DIR/etc/aifs/config/zarr_no_insolation.yaml $RAPS_AIFS_BUILD_DIR/config/data/
+ln -s $RAPS_AIFS_ROOT_DIR/etc/aifs/config/less_memory_loss_ensemble.yaml  $RAPS_AIFS_BUILD_DIR/config/training/

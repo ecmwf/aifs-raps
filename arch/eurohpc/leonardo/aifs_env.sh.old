@@ -1,0 +1,11 @@
+module load python/3.11.6--gcc--8.5.0
+
+# 2. setup_env
+export ENV_TYPE='venv'
+export INPUT_VENV_PATH="$WORK/users/cobrien0/aifs/envs/raps-dev"
+
+# 3. running
+export AIFS_DATA_PATH=/leonardo_work/DestE_340_25/ai-ml/datasets
+export AIFS_GRIDS_PATH=/leonardo_work/DestE_340_25/AIFS_grids
+export AIFS_OUTPUT_PATH=$SCRATCH/aifs/outputs/raps
+export AIFS_NUM_GPUS_PER_NODE=4

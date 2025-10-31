@@ -1,0 +1,14 @@
+module load git
+module load CUDA/12 #needed for nvml
+module load Python/3.12.3
+module load libaec/1.1.3 CMake #to build eccodes during env creation
+module load NVHPC/25.5-CUDA-12 #not strictly necessary, just trying
+
+# 2. setup_env
+export ENV_TYPE='venv'
+export INPUT_VENV_PATH='/e/project1/jureap5/obrien2/venvs/raps'
+
+# 3. running
+export AIFS_DATA_PATH=/e/project1/gkpdm/ai-ml/datasets/
+export AIFS_OUTPUT_PATH=/e/project1/jureap129/obrien2/aifs/outputs/raps
+export AIFS_NUM_GPUS_PER_NODE=4

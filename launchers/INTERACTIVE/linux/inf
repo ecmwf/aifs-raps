@@ -1,0 +1,40 @@
+#!/bin/bash
+
+cd $(dirname "$0")
+pwd
+
+source ../../../.aifsenv
+
+set -eux
+
+printenv
+
+lead_time=30
+
+jobid=$$
+
+export ANEMOI_BASE_SEED=42 
+date=20230905 #just need to set date when using a zarr file
+
+#res=o2560
+res=o800
+if [[ $res == "o2560" ]]; then
+checkpoint=$OUTROOT/train/1N_4gpm_transformer_2048c_o2560_o256_1r_0e.jobname-83024/inference-last.ckpt
+input=$AIFS_DATA_PATH/aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v3-1week.zarr
+elif [[ $res == "o800" ]]; then
+checkpoint=.../itt380-T-o800-o96-1024c.ckpt
+input=$AIFS_DATA_PATH/aifs-benchmarking-ea-an-oper-0001-mars-o800-2023-2023-6h-v1.zarr
+fi
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export DETERMINISTIC=0 #if 1, sets on torch.deter and enforces cublas deter
+
+jobname=test_$res
+
+devices=4
+mc=32
+pc=16
+
+$RAPS_AIFS_ROOT_DIR/bin/inf -j "$jobid" -J "$jobname" -I $input --checkpoint=$checkpoint --lead-time=$lead_time -D $devices --mapper-chunks=$mc --processor-chunks=$pc -d "$date" --profile #--launcher="torchrun" #--parallel-output --num-writers=1 #-O "/dev/null" #--multio
+
+exit $?

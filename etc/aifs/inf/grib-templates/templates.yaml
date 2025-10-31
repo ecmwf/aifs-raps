@@ -1,0 +1,26 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+- - levtype: pl
+  - $RAPS_AIFS_ROOT_DIR/etc/aifs/inf/grib-templates/{grid}-pl-q.grib
+- - levtype: ml
+  - $RAPS_AIFS_ROOT_DIR/etc/aifs/inf/grib-templates/{grid}-ml-t.grib
+- - levtype: o2d
+  - $RAPS_AIFS_ROOT_DIR/etc/aifs/inf/grib-templates/{grid}-o2d-262001.grib
+- - {}
+  - $RAPS_AIFS_ROOT_DIR/etc/aifs/inf/grib-templates/{grid}-sfc-lsm.grib
