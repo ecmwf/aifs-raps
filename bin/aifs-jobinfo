@@ -163,13 +163,17 @@ elif [[ $mode == "inference" ]]; then
 	start_time=$(egrep -a "^Start time:" $out 2>/dev/null | cut -d ' ' -f3 | xargs)
 	end_time=$(egrep -a "^End time:" $out 2>/dev/null | cut -d ' ' -f3 | xargs)
 	peakMem=$(egrep -a "Allocated memory " $out 2>/dev/null | cut -d '|' -f4 | xargs)
-	runtime=$(egrep -a "Inference completed in :" $out 2>/dev/null | cut -d ':' -f4 | xargs) #TODO should convert to seconds
+	runtime=$(egrep -a "Inference completed in :" $out 2>/dev/null | cut -d ':' -f4 | xargs)
+
+	runtime_minutes=$(echo "$runtime" | grep -oP '\d+(?= minutes)')
+	runtime_just_seconds=$(echo "$runtime" | grep -oP '\d+(?= seconds)')
+	runtime_seconds=$((runtime_minutes * 60 + runtime_just_seconds))
 
 	#fallbacks
 	
 
 	#print message
-	echo "$device_count,$output,$checkpoint,$input,$lead_time,$mapper_chunks,$processor_chunks,$parallel_output,$writers_per_device,$rundir,$success,$start_time,$end_time,$peakMem,$runtime"
+	echo "$device_count,$output,$checkpoint,$input,$lead_time,$mapper_chunks,$processor_chunks,$parallel_output,$writers_per_device,$rundir,$success,$start_time,$end_time,$peakMem,$runtime_seconds"
 
 else
 echo "Unknown mode: '$mode'. exiting..."
