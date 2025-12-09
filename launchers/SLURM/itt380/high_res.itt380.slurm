@@ -87,6 +87,12 @@ export AIFS_FAKE_DATALOADING=0
 batches_per_epoch=180
 max_epochs=2 #fixed in benchmark specificiation
 
+# By default, training runs with the profiler
+# This has an associated overhead
+# You can disable it by passing the following flag
+profile="--no-profile"
+#profile="" #to run with the profiler
+
 jobid=$$
 jobname=$SLURM_JOB_NAME
 
@@ -98,6 +104,6 @@ $RAPS_AIFS_ROOT_DIR/bin/train \
     --dataset="$dataset" --launcher="srun" --res="$res" \
     --model="transformer" --hidden-res="o256"  --ens=$ens_size  \
     --num-mapper-chunks=$mapper_chunks --num-processor-chunks=$proc_chunks \
-    --hydra-args="$hydra_args" "$@"
+    --hydra-args="$hydra_args" $profile "$@"
 
 exit $?

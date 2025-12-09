@@ -74,5 +74,5 @@ $RAPS_AIFS_ROOT_DIR/bin/train \
     --num-nodes="$num_nodes" --num-gpus="$num_gpus" --num-workers=8 \
     --num-gpus-per-model="$num_gpus_per_model" -C "$num_channels" --num-mapper-chunks=4 --num-processor-chunks=8 \
     --model="transformer" -h "o32"  --hydra-args="$hydra_args" $precision \
-    --dataset="$dataset" --launcher="srun" --res="$res" "$@"
+    --dataset="$dataset" --launcher="srun" --res="$res" --no-profile "$@"
 exit $?

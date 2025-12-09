@@ -85,6 +85,12 @@ max_epochs=1 #fixed in benchmark specification
 # set it to 900 here to be consistent when testing small batch sizes
 batch_limit=900
 
+# By default, training runs with the profiler
+# This has an associated overhead
+# You can disable it by passing the following flag
+profile="--no-profile"
+#profile="" #to run with the profiler
+
 $RAPS_AIFS_ROOT_DIR/bin/train \
     --train-end=$train_end_yyyymmdd --val-start=$val_start_yyyymmdd --val-end=$val_end_yyyymmdd \
     --train-batch-limit=$batch_limit --val-batch-limit=0 --max-epochs=$max_epochs \
@@ -93,6 +99,6 @@ $RAPS_AIFS_ROOT_DIR/bin/train \
     --model="graphtransformer" --hidden-res="7" -J $jobname \
     --dataset="$dataset" --launcher="srun" --res="$res" \
     --num-mapper-chunks=$mapper_chunks --num-processor-chunks=$proc_chunks \
-    --hydra-args="$hydra_args" "$@"
+    --hydra-args="$hydra_args" $profile "$@"
 
 exit $?
