@@ -62,7 +62,6 @@ date="20200101"			# -d|--date <datestring> # YYYYMMDD, currently just used to se
 device_count=1			# -D|--devices <int> #how many devices to run in parallel over, cant be more then num-gpus-per-node. to run over multiple nodes, use srun
 dryrun=0            # --dryrun          # just prints run config and quits
 dummy_input=0		# --dummy|--dummy-input	# genertae dummy inputs instead of reading inputs from agrib file
-gpus_per_node=1		# --gpus-per-node 
 input_path=""                # -I|--input|--input-path <input_file_path> # Input grib file, if unset, try fetch something off mars
 get_input=0		# --get-input		# if passed, just download input to rundir and then quit
 jobid=${pid}            # -j <jobid>        # Job ID
@@ -147,7 +146,6 @@ do
     -D|--device-count) device_count=$2; shift 2;;
     --dryrun) dryrun=1; shift;;
     --dummy|--dummy-input) dummy_input=1; shift;;
-    --gpus-per-node) gpus_per_node=$2; shift 2;;
     -I|--input|--input-path) input_path="$2"; shift 2;;
     --get-input) get_input=1; shift;;
     -j|--jobid) jobid="$2"; shift 2;;
@@ -228,9 +226,6 @@ fi
 if [[ -n ${SLURM_NNODES+x} ]]; then
 	nodes=$SLURM_NNODES
 fi
-if [[ -n ${SLURM_NTASKS_PER_NODE+x} ]]; then
-	gpus_per_node=$SLURM_NTASKS_PER_NODE
-fi
 
 input_label=gribInput
 if [[ $dummy_input == 1 ]]; then
@@ -238,7 +233,7 @@ if [[ $dummy_input == 1 ]]; then
 fi
 
 cutjobid=$(echo "$jobid" | cut -d. -f1)
-rundir=$(pwd)/${nodes}N_${gpus_per_node}gpn_${lead_time}hrs_${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER}mchunks_${ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR}pchunks_${input_label}_$output_label.${jobname}-${cutjobid}
+rundir=$(pwd)/${nodes}N_${device_count}g_${lead_time}hrs_${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER}mchunks_${ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR}pchunks_${input_label}_$output_label.${jobname}-${cutjobid}
 ver_echo "rundir=$rundir"
 rm -rf $rundir
 mkdir -p $rundir
@@ -472,7 +467,6 @@ fi
 
 if [[ ${launcher} == "srun" ]]; then
         launcher="${launcher} --nodes=$SLURM_NNODES -n $SLURM_NTASKS --cpus-per-task=$SLURM_CPUS_PER_TASK --ntasks-per-node=$SLURM_NTASKS_PER_NODE --gpus-per-node=$SLURM_NTASKS_PER_NODE -K1 "
-        #launcher="${launcher} --nodes=$nodes -n $tasks --cpus-per-task=$SLURM_CPUS_PER_TASK --ntasks-per-node=$gpus_per_node --gpus-per-node=$gpus_per_node "
 	if [[ "$device_count" -gt 1 ]]; then
 		echo "Warning. When launching with slurm, '-D $device_count' will be ignored, and '\$SLURM_NTASKS' will be used to determine the number of parallel processes"
 	fi
