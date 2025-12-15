@@ -52,7 +52,7 @@ function get_src {
 SRC_DIR=$RAPS_AIFS_BUILD_DIR/sources
 mkdir -p $SRC_DIR
 ver_echo "cloning repos into $SRC_DIR"
-anemoi_core_branch="aifs-raps_20251031"
+anemoi_core_branch="aifs-raps_20251215"
 anemoi_training_branch=$anemoi_core_branch
 anemoi_models_branch=$anemoi_core_branch
 get_anemoi_core=0
