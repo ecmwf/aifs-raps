@@ -8,7 +8,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-#SBATCH --job-name=aifs-hero-o2560-8N-0ens-8gpm-1B
+#SBATCH --job-name=aifs-hero-o2560-2N-0ens-8gpm-1B
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=72

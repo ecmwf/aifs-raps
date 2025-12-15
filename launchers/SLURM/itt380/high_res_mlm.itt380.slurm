@@ -8,8 +8,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-#SBATCH --job-name=aifs-hero-o2560-128N-4ens-8gpm-16B
-#SBATCH --nodes=128
+#SBATCH --job-name=aifs-hero-o2560-64N-2ens-8gpm-16B-mlm
+#SBATCH --nodes=64
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=72
 #SBATCH --mem=0
@@ -19,14 +19,15 @@
 #SBATCH -o %x-%j.out
 
 
-#This reference script does the entire hero training run
+# This reference script does the entire hero training run
+# It is the smaller version with only 2 ensemble members, which should be run on the MLM partition
 # It has 16 model instances running in parallel via DDP 
 # (weak scaling, each model is given different input data and gradients are synced after each step)
-# Within a model instance, there are 4 ensemble members
+# Within a model instance, there are 2 ensemble members
 # These load the same input data, add a unique random perturbation and all-gather their loss values each step
 # Each ensemble member is split across 8 GPUs
 # This split is the most communication intensive, with many all-to-alls and all-gathers each step (strong scaling)
-# In total, 512 GPUs are used: 16 model instances * 4 ensemble members * 8 gpus per model => 512 GPUs
+# In total, 256 GPUs are used: 16 model instances * 2 ensemble members * 8 gpus per model => 256 GPUs
 
 # Once your job starts running, a 'rundir' will be produced under $OUTROOT
 # You can grep the slurm output file for 'rundir=' to find it
@@ -52,7 +53,7 @@ num_channels=2048 #fixed in the benchmark specification
 num_nodes=$SLURM_NNODES
 num_gpus=$((AIFS_NUM_GPUS_PER_NODE * SLURM_NNODES))
 num_gpus_per_model=8 #You can tweak this, strong scaling
-ens_size=4 #fixed in the benchmark specification
+ens_size=2 #fixed in the benchmark specification
 res=o2560
 hydra_args="data=zarr_no_insolation"
 
