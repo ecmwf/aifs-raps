@@ -249,7 +249,6 @@ runner: parallel
 world_size: $device_count
 EOT
 
-
 #configure parallel output and num writers per device
 if [[ $parallel_out -eq 1 ]]; then
 cat <<EOT >> $config
@@ -476,7 +475,12 @@ fi
 
 echo "lead_time: $lead_time" >> $config
 
-run_cmd="$launcher $nsys_cmd anemoi-inference run $config"
+prefix=""
+if [[ $RAPS_AIFS_ENV_TYPE == "hybrid_container" ]]; then
+        prefix="$RAPS_AIFS_BUILD_DIR/bin/with-container"
+fi
+
+run_cmd="$prefix $launcher $nsys_cmd anemoi-inference run $config"
 
 cp $RAPS_AIFS_BUILD_DIR/sources/versions.txt $rundir ||{
                 echo "$RAPS_AIFS_BUILD_DIR/sources/versions.txt not found. Not copying to rundir"
