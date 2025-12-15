@@ -175,7 +175,7 @@ mkdir -p $RAPS_AIFS_BUILD_DIR/bin
 
 #e.g. lumi needs to activate a conda env when you enter the container
 container_activation_cmd=""
-if [ ! -z ${INPUT_HYBRID_CONTAINER_INIT_CMD+x} ]; then
+if [ ! -z ${INPUT_HYBRID_CONTAINER_INIT_CMD+x} ] && [ $INPUT_HYBRID_CONTAINER_INIT_CMD != "" ]; then
 	container_activation_cmd="$INPUT_HYBRID_CONTAINER_INIT_CMD;"
 fi
 

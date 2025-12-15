@@ -521,12 +521,6 @@ $run_cmd --cfg all > $rundir/config.txt
 #fi
 
 
-#if nvidia-smi is available, launch it and have it monitor the power usage
-#if command -v nvidia-smi 2>&1 >/dev/null; then
-#	nvidia-smi --query-gpu=power.draw --format=csv --loop-ms=1000 2>&1 | $rundir/logs/nvidia-smi-power.txt
-#fi
-
-
 flash_attn_required=$(grep "flash_attention" $rundir/config.txt | wc -l)
 if [[ $flash_attn_required == 1 ]]; then
 #test if flash attention is installed
@@ -539,7 +533,7 @@ if [[ ! $is_flash_attn_not_installed == 0 ]]; then
 fi
 fi
 
-ulimit -c 0 # disbale core dumps
+ulimit -c 0 # disable core dumps
 
 printenv | tee $rundir/env.txt
 
@@ -563,14 +557,6 @@ last_inf_ckpt=$rundir/train-outputs/checkpoint/$run_id/inference-last.ckpt
 if [[ -f $last_inf_ckpt ]]; then
 	ln -s $last_inf_ckpt $rundir/inference-last.ckpt
 fi
-
-#if [[ $train_exit_code == "0" ]]; then
-#try generate plots based off the mlflow plots in rundir
-#$RAPS_AIFS_ROOT_DIR/bin/plot_aifs $rundir
-#mkdir -p $rundir/plots
-# generate plots based on the pytorch profiler ('memory profiler')
-#$prefix python $RAPS_AIFS_ROOT_DIR/etc/aifs/plotting_scripts/plot_training.py $rundir -o $rundir/plots
-#fi
 
 if [[ $upload -eq 1 ]]; then
 	echo "'--upload' given, will upload run to mlflow"
