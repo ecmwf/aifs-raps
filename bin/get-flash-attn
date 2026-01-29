@@ -155,7 +155,7 @@ fi
 # and any torch builds newer then 2.6.0
 if  [[ $wheel_source == "all" ]]; then
 wheel_source="tridao"
-if  [[ $isa == "aarch64" ]] || [ `echo $torch_version'>'2.6 | bc -l` -eq 1 ] ; then
+if  [[ $isa == "aarch64" ]] || [[ "$(printf '%s\n' "$torch_version" "2.6" | sort -V | tail -n1)" == "$torch_version" ]] && [[ "$torch_version" != "2.6" ]] ; then
 wheel_source="naco"
 fi
 printf " +        source '$wheel_source'\n"
