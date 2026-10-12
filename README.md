@@ -6,22 +6,62 @@
 
 DISCLAIMER This project is BETA and will be Experimental for the foreseeable future. Interfaces and functionality are likely to change, and the project itself may be scrapped. DO NOT use this software in any project/software that is operational.
 
-AIFS-RAPS is a package for bootstrapping and benchmarking AIFS on different systems. 
+AIFS-RAPS is a package to benchmark AIFS training and inference on different systems.
 
-RAPS (Real Applications on Parallel Systems), is a benchmarking initiative that was started in the 1990s by ECMWF and a number of weather and climate research centres. The goal of this initiative was the release of realistic benchmarks to vendors outside of the usual procurement framework. This enabled vendors to gain insights into the current and future developments of these applications over a longer time period than is otherwise available during procurements. 
-For ease of use, AIFS-RAPS has been spun off into a standalone repository.
+RAPS (Real Applications on Parallel Systems) is a benchmark initiative. ECMWF and other weather and climate centres started it in the 1990s. RAPS gives realistic benchmarks to vendors outside of procurements. Vendors can then see how these applications change over a long period.
 
-This version of AIFS-RAPS is based on the ensemble version of AIFS which went operational in July 2025 as 'AIFS ENS'
-The AIFS is built on the Anemoi framework for building data-driven weather forecasting models, a collaborative effort led by European national meterological services. 
+AIFS is the ECMWF data-driven forecast model. It uses the [Anemoi](https://anemoi.readthedocs.io) framework. AIFS-RAPS uses the `feat/raps-update-oct26` branch of [anemoi-core](https://github.com/ecmwf/anemoi-core/tree/feat/raps-update-oct26).
 
-AIFS-RAPS handles some complexity of bootstrapping on different systems (e.g. offline installation, different ISA, running from a container). 
-It provides interfaces to launch training and inference runs in a consistent manner and many examples of different benchmarking configurations.
-It includes utility scripts to generate synthetic input data, post-process benchmarking runs and others.
+AIFS-RAPS contains:
 
-AIFS-RAPS is intended to benchmark AIFS performance on different systems. It is not intended to launch scientific workflows. 
+- Hydra configs for benchmarks at different resolutions (`configs/`).
+- Scripts that run a training or an inference benchmark and keep the results (`bin/train`, `bin/inf`).
+- Launchers for SLURM and for interactive runs (`launchers/`).
+- Tools to examine the results (`bin/`).
+
+AIFS-RAPS does not install software. You must supply a Python environment that contains anemoi-core.
+
+Do not use AIFS-RAPS for scientific work. Use it only to measure performance.
+
+## Quick start
+
+1. Make a Python environment that contains anemoi-core. Refer to [docs/environment.md](docs/environment.md).
+2. Make an environment file for your system. Use `env/ecmwf-ag.sh` as an example.
+3. Do a test run:
+
+   ```bash
+   export AIFS_ENV=$PWD/env/ecmwf-ag.sh
+   launchers/INTERACTIVE/train o96
+   ```
+
+4. Submit a benchmark:
+
+   ```bash
+   cd launchers/SLURM/ag
+   sbatch train_o1280.slurm
+   ```
+
+5. Examine the results in `$AIFS_OUTPUT_DIR/train/<run>/jobinfo.csv`.
 
 ## Documentation
-The documentation can be found [here](https://git.ecmwf.int/users/naco/repos/raps-doc/browse?at=anemoi-docs)
+
+<!-- not-in-html -->
+[docs/index.html](docs/index.html) shows all documents as one web page. It reads the Markdown files below. Open it through a web server:
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open <http://localhost:8000/docs/>.
+<!-- /not-in-html -->
+
+| Document | Contents |
+| --- | --- |
+| [docs/environment.md](docs/environment.md) | Make the Python environment and the environment file. |
+| [docs/running.md](docs/running.md) | Run a benchmark. |
+| [docs/configs.md](docs/configs.md) | The benchmark configs. |
+| [docs/results.md](docs/results.md) | The run directory and the performance values. |
+| [docs/inference.md](docs/inference.md) | Run inference. Model sharding and parallel output. |
 
 ## License
 ```
@@ -42,14 +82,4 @@ limitations under the License.
 In applying this licence, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation
 nor does it submit to any jurisdiction.
-```
-
-
-## Install (on ECMWFs system)
-
-```
-cd aifs-raps
-./aifs-build --build-dir build --arch arch/ecmwf/hpc2020
-cd launchers/SLURM/hpc2020
-sbatch throughput.hpc2020.slurm
 ```

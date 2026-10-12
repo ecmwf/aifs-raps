@@ -1,0 +1,82 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Settings shared by every AIFS-RAPS benchmark config.
+# Each top-level config (o96.yaml, n320.yaml, ...) includes this file first in its
+# defaults list and then overrides the resolution-specific parts.
+
+defaults:
+  - system: slurm
+  - dataloader: native_grid
+  - diagnostics: evaluation
+  - task: forecaster
+
+config_validation: true
+
+system:
+  hardware:
+    # Read from the environment so the same config works on any node/GPU count.
+    # bin/train sets these; under SLURM they come from the job allocation.
+    num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+    num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
+    num_gpus_per_model: 1
+  input:
+    # Set in each top-level config, relative to $AIFS_DATA_DIR
+    dataset: ???
+    # Graphs are cached in $AIFS_GRAPH_DIR so they are only built once.
+    # Set in each top-level config.
+    graph: ???
+  output:
+    # bin/train overrides this with a unique run directory
+    root: ${oc.env:AIFS_OUTPUT_DIR}/${data.resolution}
+
+graph:
+  overwrite: False
+
+dataloader:
+  prefetch_factor: 1
+  limit_batches:
+    training: 200
+    validation: 10
+  batch_size:
+    training: 1
+    validation: 1
+  num_workers: # dataloader processes per GPU
+    training: 8
+    validation: 8
+
+training:
+  precision: 16-mixed
+  max_epochs: 1
+  max_steps: 150000
+  num_sanity_val_steps: 0
+
+diagnostics:
+  enable_checkpointing: True
+  print_memory_summary: True
+  plot:
+    callbacks: [] # disable plotting
+  benchmark_profiler:
+    memory:
+      enabled: True
+      steps: 20
+      trace_rank0_only: True
+    snapshot:
+      enabled: False
+    system:
+      enabled: False
+    model_summary:
+      enabled: False
+  log:
+    mlflow:
+      enabled: False
+      offline: True
+      tracking_uri: ''
+      experiment_name: aifs-raps
+    interval: 50

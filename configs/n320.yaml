@@ -1,0 +1,49 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# n320 (~31km) configuration. Transformer processor on an o96 hidden grid.
+
+defaults:
+  - data: zarr
+  - model: transformer
+  - graph: encoder_decoder_only
+  - training: single
+  - base # after the groups above, so base.yaml overrides them
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
+
+system:
+  input:
+    dataset: ${oc.env:AIFS_DATA_DIR}/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    graph: ${oc.env:AIFS_GRAPH_DIR}/n320_encoder_decoder_only_o96.graph
+
+data:
+  resolution: n320
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        grid: o96
+
+model:
+  num_channels: 1024
+
+dataloader:
+  training:
+    datasets:
+      data:
+        start: 2020-01-01
+        end: 2022-12-31
+  validation:
+    datasets:
+      data:
+        start: 2023-01-01
+        end: 2023-01-31

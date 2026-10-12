@@ -8,7 +8,7 @@ $nsys_cmd srun anemoi-training
 The functions listed in the Json file will appear in the nsight profile. Both forward and backward pass is profiled, and the host function calls are linked to the relevant device kernels
 
 # How to generate
-You can use the script scripts/generate\_json.sh to generate an updated json file. You just need to edit the code to link to your new anemoi models dir. If you want to include pytorch annotations in your file you should edit the path to point to a copy of pytorch.json (can be found under nsys v25 and newer install dir)
+You can use the script scripts/generate\_json.sh to generate an updated json file. The script finds anemoi-models in your active Python environment. If you want to include pytorch annotations in your file you should edit the path to point to a copy of pytorch.json (can be found under nsys v25 and newer install dir)
 ```bash
 bash scripts/generate_json.sh new_anemoi.json
 ```

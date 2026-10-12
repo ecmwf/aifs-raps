@@ -1,0 +1,23 @@
+#!/bin/bash
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Run a benchmark on the current node, without srun.
+# Usage: launchers/INTERACTIVE/train <config> [hydra overrides]
+# e.g.   launchers/INTERACTIVE/train o96 model.num_channels=256
+
+root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+
+config=${1:?usage: $0 <config> [hydra overrides]}
+shift
+
+source ${AIFS_ENV:-$root_dir/env/ecmwf-ag.sh}
+set -eu
+
+$root_dir/bin/train --interactive --config=$config -- "$@"

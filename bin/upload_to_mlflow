@@ -16,12 +16,7 @@
 #	is auth required? 
 # 	source dir, can find in rundir
 #	run id, can find in rundir
-#	experiment name (given in config.txt)
-
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-root_dir=${SCRIPT_DIR%/bin}
-
-source $root_dir/.aifsenv
+#	experiment name (given in config.yaml)
 
 set -e
 
@@ -38,21 +33,17 @@ if [[ ! -d $rundir ]]; then
 	exit 1
 fi
 
-prefix=""
-if [[ $RAPS_AIFS_ENV_TYPE == "hybrid_container" ]]; then
-	prefix="$RAPS_AIFS_BUILD_DIR/bin/with-container"
-fi
-
 #check the mlflow import export package is installed
-$prefix pip list | grep -w mlflow_export_import 2>&1 > /dev/null ||{
-	echo "Error. the package 'mlflow_export_import' can't be found. Will try install it for you"
-	$prefix pip install git+https:///github.com/mlflow/mlflow-export-import/#egg=mlflow-export-import
+pip list | grep -w mlflow_export_import 2>&1 > /dev/null ||{
+	echo "Error. the package 'mlflow_export_import' can't be found. Install it in your environment:"
+	echo "  pip install git+https://github.com/mlflow/mlflow-export-import/#egg=mlflow-export-import"
+	exit 1
 }
 
 try_login=1
 dest_server_url="https://mlflow.ecmwf.int"
 if [[ $try_login -eq 1 ]]; then
-	$prefix anemoi-training mlflow login --url $dest_server_url
+	anemoi-training mlflow login --url $dest_server_url
 fi
 
 echo " +        -d $dest_server_url"
@@ -73,7 +64,7 @@ echo " +        -s $source_dir"
 
 
 if [[ $2 == "" ]]; then
-experiment_name=`cat $rundir/config.txt | grep experiment_name | awk -F': ' '{print $2; exit}'`
+experiment_name=`grep experiment_name $rundir/config.yaml | awk -F': ' '{print $2; exit}'`
 else
 experiment_name=$2
 fi
@@ -82,7 +73,7 @@ echo " +        -e $experiment_name"
 run_id=`awk '$4 ~/Mlflow/ {print $7; exit}' $rundir/out.txt`
 echo " +        -r $run_id"
 
-final_cmd="$prefix anemoi-training mlflow sync -s $source_dir -r $run_id -d $dest_server_url -e $experiment_name $auth_snippet"
+final_cmd="anemoi-training mlflow sync -s $source_dir -r $run_id -d $dest_server_url -e $experiment_name $auth_snippet"
 if [ "$DRYRUN" == "1" ] || [ "$OFFLINE" == "1" ]; then
 	echo "dryrun given! otherwise would execute '$final_cmd'"	
 else

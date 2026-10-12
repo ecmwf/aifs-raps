@@ -10,10 +10,11 @@
 
 set -u
 
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 rundirs=$@
 if [[ $rundirs == "" ]]; then
 	echo "error. usage: 'test-correctness <list of rundirs>'"
 	exit 0
 fi
 
-python $RAPS_AIFS_ROOT_DIR/etc/aifs/test-correctness.py $rundirs
+python $root_dir/etc/aifs/test-correctness.py $rundirs

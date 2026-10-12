@@ -17,8 +17,8 @@ if [[ $1 == "" ]]; then
 	exit 0
 fi
 
-src_dir=$RAPS_AIFS_ROOT_DIR/build/sources/anemoi-core/models/src/anemoi/models
-awk_file=$RAPS_AIFS_ROOT_DIR/etc/aifs/profiling/nsys/PythonFunctionsTrace/scripts/generate_json.awk
+src_dir=$(python -c "import anemoi.models, os; print(os.path.dirname(anemoi.models.__file__))")
+awk_file=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/generate_json.awk
 module_name="anemoi.models"
 
 include_pytorch=1
