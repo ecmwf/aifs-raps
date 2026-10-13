@@ -1,6 +1,6 @@
 # Environment
 
-AIFS-RAPS does not install software. You must supply a Python environment.
+AIFS-RAPS does not install software. You must supply a Python environment. The environment can be on the host or in a container image. For a container, refer to [containers.md](containers.md).
 
 ## Requirements
 
@@ -60,10 +60,12 @@ The launchers read an environment file. The file loads modules, activates the Py
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `AIFS_DATA_DIR` | Yes | Directory that contains the input zarr datasets. |
+| `AIFS_DATA_DIR` | No | Directory that contains the real zarr datasets. Only for real data. Refer to [configs.md](configs.md#input-data). |
 | `AIFS_OUTPUT_DIR` | Yes | Directory for the run directories. |
 | `AIFS_GRAPH_DIR` | No | Directory for the graph cache. The default is `$AIFS_OUTPUT_DIR/graphs`. |
 | `AIFS_GPUS_PER_NODE` | No | Number of GPUs on each node. The default is `$SLURM_GPUS_PER_NODE`, or all visible GPUs. |
+| `AIFS_EXEC`, `AIFS_TOOL_EXEC`, `AIFS_SRUN_ARGS` | No | Run the Python steps in a container. Refer to [containers.md](containers.md). |
+| `AIFS_RAPS_ROOT` | No | Path of the repo, for the SLURM launchers. The default is the git checkout that you submit the job from. |
 
 Do these steps:
 

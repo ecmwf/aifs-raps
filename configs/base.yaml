@@ -27,7 +27,8 @@ system:
     num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
     num_gpus_per_model: 1
   input:
-    # Set in each top-level config, relative to $AIFS_DATA_DIR
+    # Set in each top-level config. The default is a synthetic dataset
+    # ('synthetic:<grid>'). 'bin/train --dataset' changes it.
     dataset: ???
     # Graphs are cached in $AIFS_GRAPH_DIR so they are only built once.
     # Set in each top-level config.

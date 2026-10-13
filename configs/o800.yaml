@@ -22,7 +22,8 @@ defaults:
 
 system:
   input:
-    dataset: ${oc.env:AIFS_DATA_DIR}/aifs-benchmarking-ea-an-oper-0001-mars-o800-2023-2023-6h-v1.zarr
+    # Synthetic data. For real data: bin/train --dataset=aifs-benchmarking-ea-an-oper-0001-mars-o800-2023-2023-6h-v1.zarr
+    dataset: synthetic:o800
     graph: ${oc.env:AIFS_GRAPH_DIR}/o800_multi_scale_l7.graph
 
 data:

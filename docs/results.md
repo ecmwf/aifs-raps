@@ -47,8 +47,4 @@ bin/aifs-jobinfo $AIFS_OUTPUT_DIR/train/o1280_* > o1280.csv
 
 | Tool | Description |
 | --- | --- |
-| `bin/plot_aifs <rundir>` | Makes plots from the MLflow system metrics. MLflow logging must be enabled. Requires gnuplot. |
-| `bin/test-correctness <rundir> ...` | Compares the loss of runs. MLflow logging must be enabled. |
-| `bin/upload_to_mlflow <rundir>` | Sends offline MLflow logs to an MLflow server. |
-| `bin/aifs-clone-dataset` | Makes a longer dataset from copies of a short dataset. |
-| `bin/test-attn.py` | Tests the attention implementations. |
+| `bin/upload_to_mlflow <rundir>` | Sends offline MLflow logs to an MLflow server. Enable MLflow logging with `diagnostics.log.mlflow.enabled=True`. |

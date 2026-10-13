@@ -23,7 +23,8 @@ defaults:
 
 system:
   input:
-    dataset: ${oc.env:AIFS_DATA_DIR}/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+    # Synthetic data. For real data: bin/train --dataset=aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+    dataset: synthetic:o96
     graph: ${oc.env:AIFS_GRAPH_DIR}/o96_multi_scale_l5.graph
 
 data:

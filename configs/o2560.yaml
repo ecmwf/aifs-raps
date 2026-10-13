@@ -24,7 +24,8 @@ system:
   hardware:
     num_gpus_per_model: 4
   input:
-    dataset: ${oc.env:AIFS_DATA_DIR}/aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v1-1month.zarr
+    # Synthetic data. For real data: bin/train --dataset=aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v1-1month.zarr
+    dataset: synthetic:o2560
     graph: ${oc.env:AIFS_GRAPH_DIR}/o2560_encoder_decoder_only_o256.graph
 
 data:

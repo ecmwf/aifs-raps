@@ -21,6 +21,7 @@ defaults:
 
 system:
   input:
+    # Real data. Synthetic datasets support only octahedral (oNNN) grids.
     dataset: ${oc.env:AIFS_DATA_DIR}/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
     graph: ${oc.env:AIFS_GRAPH_DIR}/n320_encoder_decoder_only_o96.graph
 

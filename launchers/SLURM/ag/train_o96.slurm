@@ -18,10 +18,21 @@
 #SBATCH --time=0:30:00
 #SBATCH --output=%x-%j.out
 
+# The repo: $AIFS_RAPS_ROOT, or the git checkout that the job was submitted from.
+# (sbatch copies this script, so its own path does not give the repo.)
+root_dir=${AIFS_RAPS_ROOT:-$(git -C $SLURM_SUBMIT_DIR rev-parse --show-toplevel 2>/dev/null || :)}
+if [[ ! -x ${root_dir:-}/bin/train ]]; then
+    echo "Cannot find the AIFS-RAPS repo. Set AIFS_RAPS_ROOT, or submit the job from inside the repo" >&2
+    exit 1
+fi
 cd $SLURM_SUBMIT_DIR
-root_dir=$(git rev-parse --show-toplevel)
 
 source ${AIFS_ENV:-$root_dir/env/ecmwf-ag.sh}
 set -eu
 
-$root_dir/bin/train --config=o96 -- "$@"
+# 'sbatch train_o96.slurm -- --dataset=<ds>': the '--' stops sbatch from reading the options
+if [[ ${1:-} == "--" ]]; then
+    shift
+fi
+
+$root_dir/bin/train --config=o96 "$@"

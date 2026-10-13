@@ -10,7 +10,8 @@
 
 #
 # Batch system independent script to run an AIFS training benchmark.
-# The python environment (anemoi-training etc.) must already be active.
+# The python environment (anemoi-training etc.) must already be active, or
+# set AIFS_EXEC to run it in a container (see bin/lib/exec.sh).
 #
 # Usage: train -c <config> [options] [-- <hydra overrides>]
 #
@@ -20,14 +21,17 @@ set -euo pipefail
 
 cmd=$(basename $0)
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source $root_dir/bin/lib/exec.sh
 
 function usage
 {
     cat <<EOF
-Usage: $cmd -c <config> [options] [-- <hydra overrides>]
+Usage: $cmd -c <config> [options] [<hydra overrides>]
 
 Options:
   -c, --config <name>   Config name in $root_dir/configs (e.g. o96, n320, o1280)
+  -d, --dataset <ds>    Input dataset (default: the synthetic dataset of the config).
+                        A zarr path, a name relative to \$AIFS_DATA_DIR, or 'synthetic:<grid>'
   -J, --jobname <name>  Name used in the run directory (default: \$SLURM_JOB_NAME or 'aifs')
   --interactive         Do not use srun, even inside a SLURM allocation
   --no-profile          Run 'anemoi-training train' instead of 'anemoi-training profile'
@@ -35,18 +39,23 @@ Options:
   --dryrun              Print the resolved config and exit
   -h, --help            Show this message
 
-Everything after '--' is passed to anemoi-training as hydra overrides,
-e.g. 'model.num_channels=512 dataloader.limit_batches.training=10'.
+Arguments of the form key=value, and everything after '--', are passed to
+anemoi-training as hydra overrides, e.g. 'model.num_channels=512'.
 
 Environment:
-  AIFS_DATA_DIR         Directory containing the input zarr datasets (required)
+  AIFS_DATA_DIR         Directory containing the input zarr datasets (optional)
   AIFS_OUTPUT_DIR       Root of the run directories (required)
   AIFS_GRAPH_DIR        Graph cache (default: \$AIFS_OUTPUT_DIR/graphs)
   AIFS_GPUS_PER_NODE    GPUs per node (default: \$SLURM_GPUS_PER_NODE or all visible GPUs)
+  AIFS_EXEC             Prefix for the training command, e.g. 'apptainer exec --nv image.sif'
+  AIFS_TOOL_EXEC        Prefix for the helper steps outside srun (default: \$AIFS_EXEC)
+  AIFS_SRUN_ARGS        Extra srun options, e.g. '--container-image=image.sqsh'
 EOF
 }
 
 config=""
+dataset=""
+hydra_args=()
 jobname=${SLURM_JOB_NAME:-aifs}
 interactive=0
 mode="profile"
@@ -57,6 +66,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
     -c|--config) config=$2; shift 2;;
     --config=*) config=${1#*=}; shift;;
+    -d|--dataset) dataset=$2; shift 2;;
+    --dataset=*) dataset=${1#*=}; shift;;
     -J|--jobname) jobname=$2; shift 2;;
     --jobname=*) jobname=${1#*=}; shift;;
     --interactive) interactive=1; shift;;
@@ -65,10 +76,12 @@ while [[ $# -gt 0 ]]; do
     --dryrun) dryrun=1; shift;;
     -h|--help) usage; exit 0;;
     --) shift; break;;
+    -*) echo "$cmd: (Error) unknown argument '$1'" >&2; usage >&2; exit 1;;
+    *=*) hydra_args+=("$1"); shift;; # hydra override, e.g. model.num_channels=512
     *) echo "$cmd: (Error) unknown argument '$1'" >&2; usage >&2; exit 1;;
     esac
 done
-hydra_args=("$@")
+hydra_args+=("$@")
 
 # --- checks -----------------------------------------------------------------
 
@@ -79,14 +92,24 @@ config_dir=$root_dir/configs
 if [[ ! -f $config_dir/$config.yaml ]]; then
     echo "$cmd: (Error) config '$config_dir/$config.yaml' not found" >&2; exit 1
 fi
-if ! command -v anemoi-training > /dev/null; then
-    echo "$cmd: (Error) 'anemoi-training' not found. Activate your python environment first" >&2; exit 1
+require_cmd anemoi-training
+if [[ -z ${AIFS_OUTPUT_DIR:-} ]]; then
+    echo "$cmd: (Error) AIFS_OUTPUT_DIR is not set" >&2; exit 1
 fi
-for var in AIFS_DATA_DIR AIFS_OUTPUT_DIR; do
-    if [[ -z ${!var:-} ]]; then
-        echo "$cmd: (Error) $var is not set" >&2; exit 1
-    fi
-done
+if [[ -n $dataset ]]; then
+    case $dataset in
+        synthetic:*|/*) ;;
+        *)
+            if [[ -z ${AIFS_DATA_DIR:-} ]]; then
+                echo "$cmd: (Error) --dataset=$dataset is a relative path. Set AIFS_DATA_DIR or give an absolute path" >&2; exit 1
+            fi
+            dataset=$AIFS_DATA_DIR/$dataset;;
+    esac
+    # Before the user overrides, so these can still change it
+    hydra_args=("system.input.dataset=$dataset" "${hydra_args[@]}")
+elif grep -q 'AIFS_DATA_DIR' $config_dir/$config.yaml && [[ -z ${AIFS_DATA_DIR:-} ]]; then
+    echo "$cmd: (Error) config '$config' uses real data. Set AIFS_DATA_DIR or use --dataset" >&2; exit 1
+fi
 export AIFS_GRAPH_DIR=${AIFS_GRAPH_DIR:-$AIFS_OUTPUT_DIR/graphs}
 mkdir -p $AIFS_GRAPH_DIR
 
@@ -100,10 +123,10 @@ fi
 if [[ -z ${AIFS_GPUS_PER_NODE:-} ]]; then
     if [[ -n ${SLURM_GPUS_PER_NODE:-} ]]; then
         AIFS_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE##*:} # handles 'gpu:4' and '4'
-    elif command -v nvidia-smi > /dev/null; then
-        AIFS_GPUS_PER_NODE=$(nvidia-smi -L | wc -l)
-    elif command -v rocm-smi > /dev/null; then
-        AIFS_GPUS_PER_NODE=$(rocm-smi --showid | grep -c "^GPU\[")
+    elif in_env sh -c 'command -v nvidia-smi' > /dev/null 2>&1; then
+        AIFS_GPUS_PER_NODE=$(in_env nvidia-smi -L | wc -l)
+    elif in_env sh -c 'command -v rocm-smi' > /dev/null 2>&1; then
+        AIFS_GPUS_PER_NODE=$(in_env rocm-smi --showid | grep -c "^GPU\[")
     else
         AIFS_GPUS_PER_NODE=1
     fi
@@ -119,7 +142,7 @@ export SLURM_NNODES=$num_nodes
 launcher=()
 if [[ $in_slurm -eq 1 ]]; then
     launcher=(srun --nodes=$num_nodes --ntasks-per-node=$AIFS_GPUS_PER_NODE
-              --gpus-per-node=$AIFS_GPUS_PER_NODE --cpus-per-task=${SLURM_CPUS_PER_TASK:-1} -K1)
+              --gpus-per-node=$AIFS_GPUS_PER_NODE --cpus-per-task=${SLURM_CPUS_PER_TASK:-1} -K1 "${srun_args[@]}")
 fi
 
 # --- run directory ----------------------------------------------------------
@@ -133,7 +156,7 @@ run_cmd=(anemoi-training $mode --config-dir=$config_dir --config-name=$config
          "${hydra_args[@]}")
 
 # Save the resolved config. This also checks the config before we allocate GPUs.
-anemoi-training train --config-dir=$config_dir --config-name=$config \
+in_env anemoi-training train --config-dir=$config_dir --config-name=$config \
     system.output.root=$rundir/train-outputs "${hydra_args[@]}" \
     --cfg job --resolve > $rundir/config.yaml
 
@@ -145,11 +168,11 @@ fi
 
 profiler=()
 if [[ $use_nsys -eq 1 ]]; then
-    if command -v nsys > /dev/null; then
+    if in_env sh -c 'command -v nsys' > /dev/null 2>&1; then
         trace_file=$root_dir/etc/aifs/profiling/nsys/PythonFunctionsTrace/anemoi.json
         profiler=(nsys profile -o $rundir/nsys/out.%q{SLURM_PROCID} -f true --cuda-memory-usage true
                   --python-functions-trace=$trace_file --)
-    elif command -v rocprofv3 > /dev/null; then
+    elif in_env sh -c 'command -v rocprofv3' > /dev/null 2>&1; then
         profiler=(rocprofv3 --hip-trace -d $rundir/rocprof --)
     else
         echo "$cmd: (Error) --nsys given but neither nsys nor rocprofv3 found" >&2; exit 1
@@ -162,10 +185,10 @@ export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
 export NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS:-INIT,ENV,NET,GRAPH,TUNING}
 export NCCL_DEBUG_FILE=$rundir/logs/nccl.%h.%p
 
-echo "${launcher[*]} ${profiler[*]} ${run_cmd[*]}" > $rundir/run_cmd.txt
-pip freeze > $rundir/python_env.txt 2>/dev/null || :
-python -c 'import torch; print(torch.__config__.show())' > $rundir/pytorch_config.txt 2>&1 || :
-(nvidia-smi || rocm-smi) > $rundir/gpu.txt 2>&1 || :
+echo "${launcher[*]} ${run_exec[*]} ${profiler[*]} ${run_cmd[*]}" > $rundir/run_cmd.txt
+in_env python -m pip freeze > $rundir/python_env.txt 2>/dev/null || :
+in_env python -c 'import torch; print(torch.__config__.show())' > $rundir/pytorch_config.txt 2>&1 || :
+(in_env nvidia-smi || in_env rocm-smi) > $rundir/gpu.txt 2>&1 || :
 printenv | sort > $rundir/env.txt
 
 ulimit -c 0 # disable core dumps
@@ -173,18 +196,18 @@ ulimit -c 0 # disable core dumps
 echo "Running '$config' on $num_nodes node(s) x $AIFS_GPUS_PER_NODE GPU(s). rundir=$rundir"
 exit_code=0
 echo "Start time: $(date +%s)" | tee $rundir/out.txt
-"${launcher[@]}" "${profiler[@]}" "${run_cmd[@]}" 2>&1 | tee -a $rundir/out.txt || exit_code=$?
+"${launcher[@]}" "${run_exec[@]}" "${profiler[@]}" "${run_cmd[@]}" 2>&1 | tee -a $rundir/out.txt || exit_code=$?
 echo "End time: $(date +%s)" | tee -a $rundir/out.txt
 echo "Exit code: $exit_code" | tee -a $rundir/out.txt
 
 # --- post processing --------------------------------------------------------
 
-graph=$(python -c "import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))['system']['input']['graph'])" $rundir/config.yaml 2>/dev/null || :)
+graph=$(in_env python -c "import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))['system']['input']['graph'])" $rundir/config.yaml 2>/dev/null || :)
 if [[ -f $graph ]]; then
-    anemoi-graphs describe $graph > $rundir/graph.txt 2>&1 || :
+    in_env anemoi-graphs describe $graph > $rundir/graph.txt 2>&1 || :
 fi
 
-$root_dir/bin/aifs-jobinfo $rundir > $rundir/jobinfo.csv || :
+in_env python3 $root_dir/bin/aifs-jobinfo $rundir > $rundir/jobinfo.csv || :
 echo "Results: $rundir/jobinfo.csv"
 
 exit $exit_code

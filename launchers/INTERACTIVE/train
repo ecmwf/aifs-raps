@@ -14,10 +14,10 @@
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 
-config=${1:?usage: $0 <config> [hydra overrides]}
+config=${1:?usage: $0 <config> [bin/train options] [hydra overrides]}
 shift
 
 source ${AIFS_ENV:-$root_dir/env/ecmwf-ag.sh}
 set -eu
 
-$root_dir/bin/train --interactive --config=$config -- "$@"
+$root_dir/bin/train --interactive --config=$config "$@"

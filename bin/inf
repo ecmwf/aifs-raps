@@ -10,7 +10,8 @@
 
 #
 # Batch system independent script to run an AIFS inference benchmark.
-# The python environment (anemoi-inference etc.) must already be active.
+# The python environment (anemoi-inference etc.) must already be active, or
+# set AIFS_EXEC to run it in a container (see bin/lib/exec.sh).
 #
 # Usage: inf (-C <checkpoint> | --train-rundir <dir>) [options] [-- <config overrides>]
 #
@@ -20,6 +21,7 @@ set -euo pipefail
 
 cmd=$(basename $0)
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source $root_dir/bin/lib/exec.sh
 
 function usage
 {
@@ -52,6 +54,9 @@ Under SLURM the model is sharded over all tasks of the job step.
 
 Environment:
   AIFS_OUTPUT_DIR            Root of the run directories (required)
+  AIFS_EXEC                  Prefix for the inference command, e.g. 'apptainer exec --nv image.sif'
+  AIFS_TOOL_EXEC             Prefix for the helper steps outside srun (default: \$AIFS_EXEC)
+  AIFS_SRUN_ARGS             Extra srun options, e.g. '--container-image=image.sqsh'
 EOF
 }
 
@@ -108,9 +113,7 @@ overrides=("$@")
 
 # --- checks -----------------------------------------------------------------
 
-if ! command -v anemoi-inference > /dev/null; then
-    echo "$cmd: (Error) 'anemoi-inference' not found. Activate your python environment first" >&2; exit 1
-fi
+require_cmd anemoi-inference
 if [[ -z ${AIFS_OUTPUT_DIR:-} ]]; then
     echo "$cmd: (Error) AIFS_OUTPUT_DIR is not set" >&2; exit 1
 fi
@@ -150,8 +153,13 @@ if [[ $in_slurm -eq 1 ]]; then
     tasks_per_node=${SLURM_NTASKS_PER_NODE:-1}
     tasks_per_node=${tasks_per_node%%(*} # e.g. '4(x2)' -> '4'
     devices=$((num_nodes * tasks_per_node))
+    # The parallel runner calls 'scontrol' to find the master node if MASTER_ADDR is not set.
+    # 'scontrol' is often not in a container, so find it here, on the host.
+    if [[ -z ${MASTER_ADDR:-} ]] && command -v scontrol > /dev/null; then
+        export MASTER_ADDR=$(scontrol show hostnames "${SLURM_JOB_NODELIST:-$SLURM_NODELIST}" | head -n 1)
+    fi
     launcher=(srun --nodes=$num_nodes --ntasks-per-node=$tasks_per_node
-              --gpus-per-node=$tasks_per_node --cpus-per-task=${SLURM_CPUS_PER_TASK:-1} -K1)
+              --gpus-per-node=$tasks_per_node --cpus-per-task=${SLURM_CPUS_PER_TASK:-1} -K1 "${srun_args[@]}")
 else
     num_nodes=1
 fi
@@ -232,9 +240,9 @@ fi
 
 profiler=()
 if [[ $use_nsys -eq 1 ]]; then
-    if command -v nsys > /dev/null; then
+    if in_env sh -c 'command -v nsys' > /dev/null 2>&1; then
         profiler=(nsys profile -o $rundir/nsys/out.%q{SLURM_PROCID} -f true --cuda-memory-usage true --)
-    elif command -v rocprofv3 > /dev/null; then
+    elif in_env sh -c 'command -v rocprofv3' > /dev/null 2>&1; then
         profiler=(rocprofv3 --hip-trace -d $rundir/rocprof --)
     else
         echo "$cmd: (Error) --nsys given but neither nsys nor rocprofv3 found" >&2; exit 1
@@ -248,9 +256,9 @@ export NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS:-INIT,ENV,NET,GRAPH,TUNING}
 export NCCL_DEBUG_FILE=$rundir/logs/nccl.%h.%p
 
 run_cmd=(anemoi-inference run $config "${overrides[@]}")
-echo "${launcher[*]} ${profiler[*]} ${run_cmd[*]}" > $rundir/run_cmd.txt
-pip freeze > $rundir/python_env.txt 2>/dev/null || :
-(nvidia-smi || rocm-smi) > $rundir/gpu.txt 2>&1 || :
+echo "${launcher[*]} ${run_exec[*]} ${profiler[*]} ${run_cmd[*]}" > $rundir/run_cmd.txt
+in_env python -m pip freeze > $rundir/python_env.txt 2>/dev/null || :
+(in_env nvidia-smi || in_env rocm-smi) > $rundir/gpu.txt 2>&1 || :
 printenv | sort > $rundir/env.txt
 
 ulimit -c 0 # disable core dumps
@@ -259,7 +267,7 @@ cd $rundir
 echo "Running inference on $num_nodes node(s), $devices GPU(s). rundir=$rundir"
 exit_code=0
 echo "Start time: $(date +%s)" | tee $rundir/out.txt
-"${launcher[@]}" "${profiler[@]}" "${run_cmd[@]}" 2>&1 | tee -a $rundir/out.txt || exit_code=$?
+"${launcher[@]}" "${run_exec[@]}" "${profiler[@]}" "${run_cmd[@]}" 2>&1 | tee -a $rundir/out.txt || exit_code=$?
 echo "End time: $(date +%s)" | tee -a $rundir/out.txt
 echo "Exit code: $exit_code" | tee -a $rundir/out.txt
 

@@ -21,6 +21,8 @@ AIFS-RAPS contains:
 
 AIFS-RAPS does not install software. You must supply a Python environment that contains anemoi-core.
 
+You do not need input data. The configs use synthetic data by default. Refer to [docs/configs.md](docs/configs.md#input-data).
+
 Do not use AIFS-RAPS for scientific work. Use it only to measure performance.
 
 ## Quick start
@@ -62,6 +64,8 @@ Then open <http://localhost:8000/docs/>.
 | [docs/configs.md](docs/configs.md) | The benchmark configs. |
 | [docs/results.md](docs/results.md) | The run directory and the performance values. |
 | [docs/inference.md](docs/inference.md) | Run inference. Model sharding and parallel output. |
+| [docs/performance-tuning.md](docs/performance-tuning.md) | Settings that change the performance. |
+| [docs/containers.md](docs/containers.md) | Run with a container image. |
 
 ## License
 ```

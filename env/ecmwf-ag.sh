@@ -18,6 +18,7 @@ venv=${venv:-raps-sep26}
 source $venv_root_path/$venv/bin/activate
 
 # Input datasets (zarr)
+# Optional: only for real datasets (bin/train --dataset, the n320 config)
 export AIFS_DATA_DIR=${AIFS_DATA_DIR:-/home/mlx/ai-ml/datasets}
 # Run directories are made in $AIFS_OUTPUT_DIR/train
 export AIFS_OUTPUT_DIR=${AIFS_OUTPUT_DIR:-$SCRATCH/aifs-raps}
