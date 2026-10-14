@@ -1,2 +1,3 @@
 *ecsbatch*
 *.out
+__pycache__/

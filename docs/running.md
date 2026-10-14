@@ -75,7 +75,7 @@ bin/train --config=o800 model.num_channels=512
 | `-d`, `--dataset <ds>` | Input dataset. The default is the dataset in the config. Refer to [configs.md](configs.md#input-data). |
 | `-J`, `--jobname <name>` | Name for the run directory. The default is `$SLURM_JOB_NAME`. |
 | `--interactive` | Do not use `srun`. |
-| `--no-profile` | Use `anemoi-training train`. The default is `anemoi-training profile`. |
+| `--profile` | Use `anemoi-training profile` to enable the benchmark profiler. The default is `anemoi-training train`, without the profiler. Refer to [performance-tuning.md](performance-tuning.md#profiler). |
 | `--nsys` | Run with Nsight Systems, or with `rocprofv3` on AMD GPUs. |
 | `--dryrun` | Show the resolved config. Do not train. |
 

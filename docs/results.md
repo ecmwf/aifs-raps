@@ -27,17 +27,31 @@ The directory contains these files:
 
 ## Performance values
 
-The benchmark profiler writes tables at the end of `out.txt`. The most important values are:
+The `BenchmarkTimer` callback measures the training performance. `configs/base.yaml` enables it. The code is in `python/aifs_raps/benchmark.py`.
+
+The callback does not measure the first 10 steps (the warm-up). These steps include `torch.compile` and the start of the dataloader. The callback synchronises the GPU only at the start and at the end of the measured steps. It stops before the first validation.
+
+At the end of training, rank 0 writes one line in `out.txt`:
+
+```text
+AIFS-RAPS benchmark: warmup_steps=10 total_steps=50 measured_steps=40 measured_time_s=8.435 steps_per_s=4.7423 warmup_time_s=6.653 global_batch_size=4 samples_per_s=18.9690 peak_gpu_mem_mib=3264
+```
 
 | Value | Description |
 | --- | --- |
-| `training_avg_throughput` | Mean number of training steps each second. |
-| `run_training_epoch` | Time for one training epoch, in seconds. |
-| `Allocated memory` | Peak GPU memory. |
+| `steps_per_s` | Training steps each second, after the warm-up. |
+| `samples_per_s` | Samples each second for all GPUs: `steps_per_s` × batch size × number of model instances. Use this value to compare runs with different numbers of GPUs. |
+| `measured_steps`, `measured_time_s` | Number of measured steps and their time. |
+| `warmup_time_s` | Time for the warm-up steps. |
+| `peak_gpu_mem_mib` | Peak allocated GPU memory on rank 0, in MiB. |
+
+To change the number of warm-up steps, use `diagnostics.callbacks.0.warmup_steps=<n>`. The number of training steps must be larger than the number of warm-up steps.
+
+With `bin/train --profile`, the benchmark profiler also writes tables at the end of `out.txt`. Refer to [performance-tuning.md](performance-tuning.md#profiler).
 
 ## Compare runs
 
-`bin/aifs-jobinfo` makes one CSV line for each run directory:
+`bin/aifs-jobinfo` makes one CSV line for each run directory. It reads `config.yaml`, `run_cmd.txt` and the `AIFS-RAPS benchmark` line in `out.txt`. The columns `TrainingEpochTimeS` and `AvgTrainingThroughput` come from the profiler tables. They are empty if you did not use `--profile`.
 
 ```bash
 bin/aifs-jobinfo $AIFS_OUTPUT_DIR/train/o1280_* > o1280.csv

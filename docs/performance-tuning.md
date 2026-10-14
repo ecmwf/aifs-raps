@@ -10,19 +10,33 @@ Record the overrides that you use with your results. `config.yaml` and `run_cmd.
 
 ## Profiler
 
-`bin/train` runs `anemoi-training profile`. The benchmark profiler measures the time and the throughput. `bin/aifs-jobinfo` reads the result tables of the profiler from `out.txt`.
+By default, `bin/train` runs `anemoi-training train`, without the benchmark profiler. The `BenchmarkTimer` callback measures the throughput and the peak GPU memory. Its overhead is very small: it synchronises the GPU only two times. Refer to [results.md](results.md#performance-values).
 
-| Part | Default | Override | Effect |
+To enable the benchmark profiler, use `--profile`:
+
+```bash
+bin/train --config=o96 --profile
+sbatch train_o96.slurm -- --profile
+```
+
+`bin/train --profile` runs `anemoi-training profile`. Use it to find where the time goes, not for the benchmark result. The profiler makes the training slower. For example, o96 on 4 GH200 GPUs, measured by `BenchmarkTimer`:
+
+| Mode | Steps each second |
+| --- | --- |
+| Default | 4.74 |
+| `--profile` | 0.89 |
+
+The `training_avg_throughput` value of the profiler for the same run was 3.96. This value does not show all of the profiler overhead. Do not compare it with `steps_per_s`.
+
+| Part | Default with `--profile` | Override | Effect |
 | --- | --- | --- | --- |
-| Time and speed | On | `diagnostics.benchmark_profiler.time.enabled`, `...speed.enabled` | Give the values in `jobinfo.csv`. Small overhead. Keep them on. |
-| Memory | On, 20 steps, rank 0 only | `diagnostics.benchmark_profiler.memory.enabled=False` | Gives the peak GPU memory. The steps that it records are slower. At the end, it uses much host memory to make the summary. |
+| Time and speed | On | `diagnostics.benchmark_profiler.time.enabled`, `...speed.enabled` | Give the time of each training action, and the `TrainingEpochTimeS` and `AvgTrainingThroughput` columns in `jobinfo.csv`. Small overhead. |
+| Memory | On, 20 steps, rank 0 only | `diagnostics.benchmark_profiler.memory.enabled=False` | Gives a trace of the GPU memory. The steps that it records are slower. At the end, it uses much host memory to make the summary. |
 | System, snapshot, model summary | Off | `diagnostics.benchmark_profiler.<part>.enabled=True` | Use them only to examine a problem. |
 
-Do these steps:
+Without `--profile`, `bin/train` disables the progress bar (`diagnostics.enable_progress_bar=False`) to keep `out.txt` small. The profiler needs the progress bar, so `--profile` keeps it.
 
-- To measure the best time, disable the memory profiler.
-- If a large config stops with a host out-of-memory error after training, decrease `diagnostics.benchmark_profiler.memory.steps` or disable the memory profiler.
-- Do not use `--no-profile` for benchmark results. Without the profiler, `out.txt` does not contain the result tables, and `jobinfo.csv` is empty.
+If a large config stops with a host out-of-memory error after training with `--profile`, decrease `diagnostics.benchmark_profiler.memory.steps` or disable the memory profiler.
 
 ### Memory profiler schedule
 
@@ -54,8 +68,10 @@ Enable the callback:
 
 ```bash
 bin/train --config=o2560 \
-  'diagnostics.callbacks=[{_target_: anemoi.training.diagnostics.callbacks.step_timing.StepTimingLogger}]'
+  'diagnostics.callbacks=[{_target_: aifs_raps.benchmark.BenchmarkTimer, warmup_steps: 10}, {_target_: anemoi.training.diagnostics.callbacks.step_timing.StepTimingLogger}]'
 ```
+
+The override replaces the list of callbacks. Keep the `BenchmarkTimer` in the list. If you remove it, `jobinfo.csv` does not contain the throughput.
 
 ### Garbage collection
 
@@ -221,7 +237,7 @@ The mappers use the larger value: the value in the checkpoint, or the value of t
 
 ## Model sharding
 
-If the model does not fit in the memory of one GPU, divide it across more GPUs:
+If the model does not fit in the memory of one GPU or you want to decrease the training walltime, divide the work across more GPUs:
 
 | Override | Description |
 | --- | --- |

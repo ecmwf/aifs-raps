@@ -16,6 +16,7 @@
 # Usage: train -c <config> [options] [-- <hydra overrides>]
 #
 # Author: Cathal O'Brien (ECMWF) 13-Nov-2024 : Initial version
+# 				 14-Oct-2026 : Update to new anemoi version
 
 set -euo pipefail
 
@@ -34,7 +35,7 @@ Options:
                         A zarr path, a name relative to \$AIFS_DATA_DIR, or 'synthetic:<grid>'
   -J, --jobname <name>  Name used in the run directory (default: \$SLURM_JOB_NAME or 'aifs')
   --interactive         Do not use srun, even inside a SLURM allocation
-  --no-profile          Run 'anemoi-training train' instead of 'anemoi-training profile'
+  --profile             Run 'anemoi-training profile' (benchmark profiler) instead of 'anemoi-training train'
   --nsys                Run under nsys (or rocprofv3 on AMD)
   --dryrun              Print the resolved config and exit
   -h, --help            Show this message
@@ -58,7 +59,7 @@ dataset=""
 hydra_args=()
 jobname=${SLURM_JOB_NAME:-aifs}
 interactive=0
-mode="profile"
+mode="train"
 use_nsys=0
 dryrun=0
 
@@ -71,7 +72,7 @@ while [[ $# -gt 0 ]]; do
     -J|--jobname) jobname=$2; shift 2;;
     --jobname=*) jobname=${1#*=}; shift;;
     --interactive) interactive=1; shift;;
-    --no-profile) mode="train"; shift;;
+    --profile) mode="profile"; shift;;
     --nsys) use_nsys=1; shift;;
     --dryrun) dryrun=1; shift;;
     -h|--help) usage; exit 0;;
@@ -110,6 +111,14 @@ if [[ -n $dataset ]]; then
 elif grep -q 'AIFS_DATA_DIR' $config_dir/$config.yaml && [[ -z ${AIFS_DATA_DIR:-} ]]; then
     echo "$cmd: (Error) config '$config' uses real data. Set AIFS_DATA_DIR or use --dataset" >&2; exit 1
 fi
+# The BenchmarkTimer callback in configs/base.yaml
+export PYTHONPATH=$root_dir/python${PYTHONPATH:+:$PYTHONPATH}
+
+if [[ $mode == "train" ]]; then
+    # The progress bar writes many lines to out.txt. The profiler needs it, so keep it there.
+    hydra_args=("diagnostics.enable_progress_bar=False" "${hydra_args[@]}")
+fi
+
 export AIFS_GRAPH_DIR=${AIFS_GRAPH_DIR:-$AIFS_OUTPUT_DIR/graphs}
 mkdir -p $AIFS_GRAPH_DIR
 

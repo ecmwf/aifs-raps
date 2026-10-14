@@ -71,7 +71,8 @@ Some synthetic datasets on disk have dates that are not correct. For these datas
 - Training runs for 1 epoch.
 - Plots are disabled.
 - MLflow logging is disabled.
-- The memory profiler is enabled.
+- The `BenchmarkTimer` callback measures the training steps. Refer to [results.md](results.md#performance-values).
+- The benchmark profiler is disabled. `bin/train --profile` enables it, with the memory profiler for 20 steps on rank 0.
 - The number of nodes and GPUs comes from the environment.
 
 ## Graphs

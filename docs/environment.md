@@ -17,7 +17,7 @@ The environment must contain these packages:
 | anemoi-inference | `main` branch of [anemoi-inference](https://github.com/ecmwf/anemoi-inference). Only for inference. |
 | anemoi-utils | 0.5.13 or later |
 | torch-geometric | 2.8 or later |
-| tabulate | any. The benchmark profiler uses it to write the result tables. |
+| tabulate | any. Only for `bin/train --profile`. The benchmark profiler uses it to write the result tables. |
 | pyg-lib | optional, must match your PyTorch and CUDA versions |
 | flash-attn | optional |
 

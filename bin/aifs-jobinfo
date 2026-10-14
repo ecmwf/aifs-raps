@@ -26,7 +26,8 @@ FIELDS = [
     "Config", "NodeCount", "GPUsPerNode", "GPUCount", "GPUsPerModel", "BatchSizePerModel",
     "GlobalBatchSize", "EnsembleSizePerDevice", "NumChannels", "Model", "SourceRes", "Graph",
     "Precision", "TrainBatchLimit", "MaxEpochs", "NumWorkers", "Dataset", "Success",
-    "StartTime", "EndTime", "TrainingEpochTimeS", "AvgTrainingThroughput", "PeakGPUMem", "rundir",
+    "StartTime", "EndTime", "WarmupSteps", "MeasuredSteps", "MeasuredTimeS", "StepsPerSecond",
+    "SamplesPerSecond", "PeakGPUMemMiB", "Profiler", "TrainingEpochTimeS", "AvgTrainingThroughput", "rundir",
 ]
 
 
@@ -53,6 +54,24 @@ def profiler_value(text, name, column=0):
     return cells[column] if len(cells) > column else ""
 
 
+def benchmark_values(text):
+    """Return the key=value pairs of the last 'AIFS-RAPS benchmark:' line (BenchmarkTimer callback)."""
+    lines = [line for line in text.splitlines() if "AIFS-RAPS benchmark:" in line]
+    if not lines:
+        return {}
+    pairs = lines[-1].split("AIFS-RAPS benchmark:", 1)[1].split()
+    return dict(pair.split("=", 1) for pair in pairs if "=" in pair)
+
+
+def peak_mem_mib(text):
+    """Peak allocated GPU memory from the CUDA memory summary table, in MiB."""
+    value = profiler_value(text, "Allocated memory", column=1)  # | name | current | peak | ...
+    match = re.fullmatch(r"([\d.]+)\s*(KiB|MiB|GiB)", value.strip())
+    if not match:
+        return ""
+    return f"{float(match.group(1)) * {'KiB': 1 / 1024, 'MiB': 1, 'GiB': 1024}[match.group(2)]:.0f}"
+
+
 def last_match(pattern, text):
     matches = re.findall(pattern, text, re.MULTILINE)
     return matches[-1].strip() if matches else ""
@@ -62,12 +81,15 @@ def jobinfo(rundir):
     rundir = Path(rundir)
     cfg = yaml.safe_load((rundir / "config.yaml").read_text()) if (rundir / "config.yaml").exists() else {}
     out = (rundir / "out.txt").read_text(errors="ignore") if (rundir / "out.txt").exists() else ""
+    run_cmd = (rundir / "run_cmd.txt").read_text() if (rundir / "run_cmd.txt").exists() else ""
 
     nodes = int(get(cfg, "system.hardware.num_nodes", 1) or 1)
     gpn = int(get(cfg, "system.hardware.num_gpus_per_node", 1) or 1)
     gpm = int(get(cfg, "system.hardware.num_gpus_per_model", 1) or 1)
     bpm = int(get(cfg, "dataloader.batch_size.training", 1) or 1)
     model_target = get(cfg, "model.processor._target_", "")
+    bench = benchmark_values(out)
+    profiled = "anemoi-training profile" in run_cmd
 
     return {
         "Config": rundir.name.split("_")[0],
@@ -90,9 +112,16 @@ def jobinfo(rundir):
         "Success": int("Exit code: 0" in out),
         "StartTime": last_match(r"^Start time: (\d+)", out),
         "EndTime": last_match(r"^End time: (\d+)", out),
-        "TrainingEpochTimeS": profiler_value(out, "run_training_epoch"),  # | name | total time | ...
-        "AvgTrainingThroughput": profiler_value(out, "training_avg_throughput"),
-        "PeakGPUMem": profiler_value(out, "Allocated memory", column=1).replace(" ", ""),  # | name | current | peak | ...
+        "WarmupSteps": bench.get("warmup_steps", ""),
+        "MeasuredSteps": bench.get("measured_steps", ""),
+        "MeasuredTimeS": bench.get("measured_time_s", ""),
+        "StepsPerSecond": bench.get("steps_per_s", ""),
+        "SamplesPerSecond": bench.get("samples_per_s", ""),
+        "PeakGPUMemMiB": bench.get("peak_gpu_mem_mib") or peak_mem_mib(out),
+        "Profiler": int(profiled),
+        # Only with bin/train --profile
+        "TrainingEpochTimeS": profiler_value(out, "run_training_epoch") if profiled else "",  # | name | total time | ...
+        "AvgTrainingThroughput": profiler_value(out, "training_avg_throughput") if profiled else "",
         "rundir": str(rundir),
     }
 

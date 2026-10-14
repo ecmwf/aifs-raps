@@ -61,8 +61,14 @@ training:
 diagnostics:
   enable_checkpointing: True
   print_memory_summary: True
+  # Times the training steps after a warm-up and prints the 'AIFS-RAPS benchmark:'
+  # line that bin/aifs-jobinfo reads. bin/train puts python/ on PYTHONPATH.
+  callbacks:
+    - _target_: aifs_raps.benchmark.BenchmarkTimer
+      warmup_steps: 10
   plot:
     callbacks: [] # disable plotting
+  # Only used with 'bin/train --profile' (anemoi-training profile)
   benchmark_profiler:
     memory:
       enabled: True
