@@ -91,5 +91,5 @@ Hydra overrides have the form `key=value`. Put them after the options, or after 
 | `dataloader.limit_batches.training=<n>` | Number of training steps in each epoch. |
 | `dataloader.num_workers.training=<n>` | Number of dataloader processes for each GPU. |
 | `training.max_epochs=<n>` | Number of epochs. |
-| `training.precision=<p>` | For example `16-mixed` or `bf16-mixed`. |
+| `training.precision=<p>` | `16-mixed`, `bf16-mixed`, `bf16-fp32-opt` or `32`. Refer to [precision.md](precision.md). |
 | `diagnostics.log.mlflow.enabled=True` | Write offline MLflow logs. |

@@ -24,6 +24,47 @@ Do these steps:
 - If a large config stops with a host out-of-memory error after training, decrease `diagnostics.benchmark_profiler.memory.steps` or disable the memory profiler.
 - Do not use `--no-profile` for benchmark results. Without the profiler, `out.txt` does not contain the result tables, and `jobinfo.csv` is empty.
 
+### Memory profiler schedule
+
+The memory profiler has two more settings:
+
+| Override | Default | Description |
+| --- | --- | --- |
+| `++diagnostics.benchmark_profiler.memory.wait=<n>` | 0 | Number of steps with the profiler fully off before the warmup steps. These steps have no profiler overhead. |
+| `++diagnostics.benchmark_profiler.memory.repeat=<n>` | 1 | Number of wait, warmup and record cycles. Each cycle writes its own trace file. |
+
+Use them to keep the profiler out of the steps that you measure, or to record a slow phase late in the run.
+
+## Step timing
+
+The `StepTimingLogger` callback writes one line for each step on each rank. The line starts with `[steptime]`. It contains host timestamps (`time.time()`) for these events:
+
+| Field | Event |
+| --- | --- |
+| `start` | The batch is ready. |
+| `fwd_end` | The model forward pass returns, before the loss. |
+| `backward` | The backward pass starts. |
+| `end` | The step ends. |
+| `data_wait` | Time from the end of the previous step to `start`. This is the time to wait for the dataloader. |
+| `gc_ms`, `gc2_ms` | Time in the Python garbage collector during the step: all generations, and generation 2 (full collections) only. |
+
+The callback does not add device synchronisation. Compare the timestamps of the same step on all ranks. A rank that is late shows a straggler, a dataloader stall or a garbage collection pause.
+
+Enable the callback:
+
+```bash
+bin/train --config=o2560 \
+  'diagnostics.callbacks=[{_target_: anemoi.training.diagnostics.callbacks.step_timing.StepTimingLogger}]'
+```
+
+### Garbage collection
+
+A full Python garbage collection scans all the long-lived objects. This can take more than 200 ms. Each rank does it at a different step. In a model group, all ranks then wait for the slow rank.
+
+With the `StepTimingLogger` callback, set `ANEMOI_GC_MODE=freeze`. At the start of training, the callback collects the garbage one time. It then freezes all the objects that remain. Later full collections do not scan them. On a 4.4 km grid with 64 GPUs, this decreased the mean step time from 699 ms to 627 ms.
+
+`ANEMOI_GC_MODE` has an effect only when the `StepTimingLogger` callback is enabled.
+
 ## Checkpoints
 
 There are two types of checkpointing. They are different.
@@ -117,9 +158,12 @@ The `transformer` model has the key only in the mappers.
 | --- | --- |
 | `16-mixed` | Default. fp16 with fp32 weights. Uses loss scaling. |
 | `bf16-mixed` | bf16 with fp32 weights. Usually as fast as fp16, and more stable. Needs Ampere GPUs or newer. |
+| `bf16-fp32-opt` | The model weights are bf16. The optimizer uses fp32 reference weights. No autocast, thus no cast kernels. Needs Ampere GPUs or newer. |
 | `32` | fp32. Slowest. Use it only as a reference. |
 
 Use the same precision on all the systems that you compare.
+
+[precision.md](precision.md) describes the options and the explicit bf16 precision (`bf16-fp32-opt`).
 
 For inference, use `bin/inf --precision`. The default is `bf16`. Refer to [inference.md](inference.md).
 
@@ -186,4 +230,22 @@ If the model does not fit in the memory of one GPU, divide it across more GPUs:
 
 More GPUs for each model decrease the memory for each GPU, but add communication. Do these steps in this sequence: increase the chunks, then increase `num_gpus_per_model`.
 
+The encoder and the decoder (and the processor of the `graphtransformer` model) use a halo exchange with the `edges` strategy. [parallelism.md](parallelism.md) describes the parallelisation scheme.
+
 For inference, refer to [inference.md](inference.md#model-sharding).
+
+## Host overhead
+
+With many GPUs for each model, each GPU has a small part of the grid. The host time to launch the kernels can then limit the step time. These environment variables decrease the host overhead:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ANEMOI_TRITON_GT_EAGER_FUNCTION` | `1` | Outside `torch.compile`, call the Triton graph transformer kernels through a plain `autograd.Function`. The results are the same. `0` uses the PyTorch custom op. |
+| `ANEMOI_CKPT_PRESERVE_RNG_STATE` | `1` | `0` does not save and restore the random number state in activation checkpointing. Use `0` only if the checkpointed layers have no dropout or other random operations. |
+| `ANEMOI_TRAIN_LOSS_SYNC_DIST` | `1` | `0` logs the training loss without the synchronisation of all ranks. Only the logged value changes. The training does not change. |
+| `ANEMOI_HALO_COMM` | `p2p` | Refer to [parallelism.md](parallelism.md#communication). |
+| `ANEMOI_BF16_GRAD_REDUCE` | `0` | Refer to [precision.md](precision.md#performance). Do not use it for benchmark results. |
+
+Together, `ANEMOI_TRITON_GT_EAGER_FUNCTION=1` and `ANEMOI_CKPT_PRESERVE_RNG_STATE=0` decreased the host time of the forward pass by approximately 7%.
+
+Record the environment variables that you set with your results.

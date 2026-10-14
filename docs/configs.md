@@ -54,6 +54,14 @@ bin/train --config=o96 --dataset=aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.z
 
 The `n320` config uses `$AIFS_DATA_DIR`. If `AIFS_DATA_DIR` is not set, use `--dataset`.
 
+### Datasets with incorrect dates
+
+Some synthetic datasets on disk have dates that are not correct. For these datasets, set `dataloader.ignore_dataset_dates=True`. anemoi-training then ignores the `start` and `end` dates of training, validation and test. It finds the samples from the shape of the data, not from the dates.
+
+- This setting is only for one native-grid dataset at its native frequency.
+- Training, validation and test can use the same samples. Use this setting only to measure performance.
+- You do not need this setting for `synthetic:<grid>` data.
+
 ## Benchmark settings
 
 `base.yaml` sets these values:

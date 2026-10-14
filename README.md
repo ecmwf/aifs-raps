@@ -65,6 +65,8 @@ Then open <http://localhost:8000/docs/>.
 | [docs/results.md](docs/results.md) | The run directory and the performance values. |
 | [docs/inference.md](docs/inference.md) | Run inference. Model sharding and parallel output. |
 | [docs/performance-tuning.md](docs/performance-tuning.md) | Settings that change the performance. |
+| [docs/parallelism.md](docs/parallelism.md) | Data parallelism, model sharding and the halo exchange. |
+| [docs/precision.md](docs/precision.md) | Training precision. The explicit bf16 precision (`bf16-fp32-opt`). |
 | [docs/containers.md](docs/containers.md) | Run with a container image. |
 
 ## License
