@@ -78,6 +78,7 @@ The `transformer` model (configs `n320`, `o1280` and `o2560`) uses attention in 
 | --- | --- |
 | `flash_attention` | Default. Flash Attention. Faster than PyTorch attention. You must install it. |
 | `scaled_dot_product_attention` | PyTorch attention. Slower, but you do not install other packages. Use it to compare, or if Flash Attention is not available. |
+| `triton_attention` | Triton sliding window attention kernel. Roughly as fast as FA2, comes with anemoi-models. no installation (beyond triton) required. |
 
 anemoi-models uses the newest Flash Attention version that is installed:
 
@@ -88,8 +89,6 @@ anemoi-models uses the newest Flash Attention version that is installed:
 | 2 | `flash-attn` | `flash_attn` | For Ampere GPUs and newer, and AMD MI200 and newer. |
 
 The log shows the version, for example `Using flash attention v4`. To use an older version, remove the newer packages from the environment. Versions 3 and 4 do not support `use_rotary_embeddings` and `use_alibi_slopes`.
-
-For aarch64 systems, there are no prebuilt Flash Attention wheels. You must build it from source.
 
 For inference, `ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND=<value>` replaces the value in the checkpoint.
 
