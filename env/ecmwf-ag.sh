@@ -13,13 +13,13 @@
 
 module load python3/3.12.9-01 nvidia/25.7
 
-venv_root_path=${venv_root_path:-/perm/naco/venvs}
-venv=${venv:-raps-sep26}
+venv_root_path=${venv_root_path:-$PERM/venvs}
+venv=${venv:-aifs-raps}
 source $venv_root_path/$venv/bin/activate
 
 # Input datasets (zarr)
 # Optional: only for real datasets (bin/train --dataset, the n320 config)
-export AIFS_DATA_DIR=${AIFS_DATA_DIR:-/home/mlx/ai-ml/datasets}
+export AIFS_DATA_DIR=...
 # Run directories are made in $AIFS_OUTPUT_DIR/train
 export AIFS_OUTPUT_DIR=${AIFS_OUTPUT_DIR:-$SCRATCH/aifs-raps}
 # Graphs are cached here and used again by later runs
