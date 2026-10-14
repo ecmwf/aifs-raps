@@ -29,8 +29,9 @@ function usage
 Usage: $cmd (-C <checkpoint> | --train-rundir <dir>) [options] [-- <config overrides>]
 
 Options:
-  -C, --checkpoint <path>    Inference checkpoint (inference-*.ckpt)
-  --train-rundir <dir>       Use the last inference checkpoint of a bin/train run directory
+  -C, --checkpoint <path>    Inference checkpoint (inference-*.ckpt), or a directory that contains
+                             one, e.g. a bin/train run directory (uses the newest inference-last.ckpt)
+  --train-rundir <dir>       Same as --checkpoint <dir>
   -T, --lead-time <hours>    Forecast length in hours (default: 240)
   -I, --input <input>        'dummy' (synthetic fields, default), a GRIB file or a zarr dataset
   -d, --date <date>          Initial date, e.g. 2023-06-01T12:00:00 (default: 2023-01-01T00:00:00)
@@ -118,14 +119,21 @@ if [[ -z ${AIFS_OUTPUT_DIR:-} ]]; then
     echo "$cmd: (Error) AIFS_OUTPUT_DIR is not set" >&2; exit 1
 fi
 
+if [[ -z $checkpoint ]] && [[ -z $train_rundir ]]; then
+    echo "$cmd: (Error) give a checkpoint with --checkpoint or --train-rundir" >&2; exit 1
+fi
 if [[ -z $checkpoint ]]; then
-    if [[ -z $train_rundir ]]; then
-        echo "$cmd: (Error) give a checkpoint with --checkpoint or --train-rundir" >&2; exit 1
-    fi
-    checkpoint=$(ls -t $train_rundir/train-outputs/checkpoint/*/inference-last.ckpt 2>/dev/null | head -n 1 || :)
+    checkpoint=$train_rundir
+fi
+if [[ -d $checkpoint ]]; then
+    # A directory: a bin/train run directory, its checkpoint directory, or one run id in it
+    dir=$checkpoint
+    checkpoint=$(ls -t $dir/inference-last.ckpt $dir/*/inference-last.ckpt \
+                       $dir/train-outputs/checkpoint/*/inference-last.ckpt 2>/dev/null | head -n 1 || :)
     if [[ -z $checkpoint ]]; then
-        echo "$cmd: (Error) no inference-last.ckpt found in $train_rundir/train-outputs/checkpoint" >&2; exit 1
+        echo "$cmd: (Error) no inference-last.ckpt found in '$dir'" >&2; exit 1
     fi
+    echo "Using checkpoint $checkpoint"
 fi
 if [[ ! -f $checkpoint ]]; then
     echo "$cmd: (Error) checkpoint '$checkpoint' not found" >&2; exit 1

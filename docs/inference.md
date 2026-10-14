@@ -31,15 +31,17 @@ launchers/INTERACTIVE/inf --checkpoint=/path/to/inference-last.ckpt
 To use the last checkpoint of a training run, give the run directory:
 
 ```bash
-sbatch inf.slurm -- --train-rundir=$AIFS_OUTPUT_DIR/train/<run>
+sbatch inf.slurm -- --checkpoint=$AIFS_OUTPUT_DIR/train/<run>
 ```
+
+If `--checkpoint` is a directory, `bin/inf` uses the newest `inference-last.ckpt` in it. The directory can be a run directory, its `train-outputs/checkpoint` directory, or a directory in `train-outputs/checkpoint`.
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `-C`, `--checkpoint <path>` | Inference checkpoint. |
-| `--train-rundir <dir>` | Use the last inference checkpoint of a `bin/train` run directory. |
+| `-C`, `--checkpoint <path>` | Inference checkpoint, or a directory that contains one. |
+| `--train-rundir <dir>` | The same as `--checkpoint <dir>`. |
 | `-T`, `--lead-time <hours>` | Length of the forecast. The default is 240. |
 | `-I`, `--input <input>` | `dummy`, a GRIB file or a zarr dataset. The default is `dummy`. |
 | `-d`, `--date <date>` | Initial date. The default is `2023-01-01T00:00:00`. |
