@@ -40,6 +40,7 @@ Do not use AIFS-RAPS for scientific work. Use it only to measure performance.
 
    ```bash
    cd launchers/SLURM/ag
+   # update to source the right env.sh file
    sbatch train_o1280.slurm
    ```
 
