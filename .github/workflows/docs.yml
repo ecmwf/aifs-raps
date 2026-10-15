@@ -1,0 +1,39 @@
+# Publish the documentation viewer (docs/index.html) to GitHub Pages.
+# Only README.md and docs/ are published. The Markdown files are served as they are
+# (no Jekyll), so the viewer can fetch and render them.
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths: [README.md, "docs/**", .github/workflows/docs.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}docs/
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build site
+        run: |
+          mkdir -p _site
+          cp README.md _site/
+          cp -r docs _site/docs
+          touch _site/.nojekyll
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=docs/"><a href="docs/">Documentation</a>\n' > _site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+      - id: deployment
+        uses: actions/deploy-pages@v4
