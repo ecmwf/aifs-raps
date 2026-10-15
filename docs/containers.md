@@ -56,7 +56,7 @@ export AIFS_EXEC="apptainer exec --nv --bind $repo,$AIFS_OUTPUT_DIR $AIFS_IMAGE"
 Make sure that:
 
 - `--nv` is in the command. Without it, the container does not see the GPUs.
-- The container can see the repo, `$AIFS_OUTPUT_DIR`, `$AIFS_GRAPH_DIR` and `$AIFS_DATA_DIR`. Use `--bind` for each directory that is not in the image.
+- The container can see the repo, `$AIFS_OUTPUT_DIR`, `$AIFS_GRAPH_DIR`, `$AIFS_DATA_DIR` and `$TMPDIR`. Use `--bind` for each directory that is not in the image. `bin/train` keeps the Triton kernel cache in `$TMPDIR`.
 - You do not use `--cleanenv` or `--containall`. PyTorch Lightning reads the SLURM variables, and `bin/train` sets variables that the configs read.
 
 Apptainer sets its own `PATH` in the container. If the Python environment is not on the default `PATH` of the image, add `--env PATH=<path>`.

@@ -190,6 +190,10 @@ if [[ $use_nsys -eq 1 ]]; then
 fi
 
 export HYDRA_FULL_ERROR=1
+# Triton keeps compiled kernels in ~/.triton/cache. If $HOME is on a network file system,
+# many ranks that write the same kernel at the same time can fail with "Stale file handle".
+# Use node-local storage. Each job then compiles its kernels again.
+export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-${TMPDIR:-/tmp}/triton-cache}
 export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
 export NCCL_DEBUG_SUBSYS=${NCCL_DEBUG_SUBSYS:-INIT,ENV,NET,GRAPH,TUNING}
 export NCCL_DEBUG_FILE=$rundir/logs/nccl.%h.%p

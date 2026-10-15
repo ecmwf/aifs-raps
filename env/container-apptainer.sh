@@ -22,6 +22,7 @@ export AIFS_GRAPH_DIR=${AIFS_GRAPH_DIR:-$AIFS_OUTPUT_DIR/graphs}
 
 # The container must see the repo, the output directory and (if used) the datasets.
 repo=${AIFS_RAPS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}
-binds=$repo,$AIFS_OUTPUT_DIR${AIFS_DATA_DIR:+,$AIFS_DATA_DIR}
+# $TMPDIR holds the Triton kernel cache (bin/train sets TRITON_CACHE_DIR)
+binds=$repo,$AIFS_OUTPUT_DIR${AIFS_DATA_DIR:+,$AIFS_DATA_DIR}${TMPDIR:+,$TMPDIR}
 mkdir -p $AIFS_OUTPUT_DIR
 export AIFS_EXEC="apptainer exec --nv --bind $binds $AIFS_IMAGE"

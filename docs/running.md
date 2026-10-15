@@ -93,3 +93,13 @@ Hydra overrides have the form `key=value`. Put them after the options, or after 
 | `training.max_epochs=<n>` | Number of epochs. |
 | `training.precision=<p>` | `16-mixed`, `bf16-mixed`, `bf16-fp32-opt` or `32`. Refer to [precision.md](precision.md). |
 | `diagnostics.log.mlflow.enabled=True` | Write offline MLflow logs. |
+
+## Known problems
+
+### A multi-node run stops making progress after the first steps
+
+**Symptom:** `out.txt` stops changing. The GPUs show 100% use. One rank shows `OSError: [Errno 116] Stale file handle` in Triton (`triton/compiler/compiler.py`). The job ends at the NCCL timeout or at the time limit.
+
+**Cause:** Triton keeps its compiled kernels in a cache directory. The default is `~/.triton/cache`. If `$HOME` is on a network file system, ranks on different nodes write the same files at the same time, and a rank can fail when it reads one. The other ranks then wait for it.
+
+**Remedy:** `bin/train` and `bin/inf` set `TRITON_CACHE_DIR` to `$TMPDIR/triton-cache` (or `/tmp/triton-cache`) on node-local storage. If you set `TRITON_CACHE_DIR` yourself, use a directory on node-local storage.

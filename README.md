@@ -48,7 +48,7 @@ Do not use AIFS-RAPS for scientific work. Use it only to measure performance.
 ## Documentation
 
 <!-- not-in-html -->
-[docs/index.html](docs/index.html) shows all documents as one web page. It reads the Markdown files below. Open it through a web server:
+[docs/index.html](docs/index.html) shows all documents as one web page. It reads the Markdown files below. It is published at <https://ecmwf.github.io/aifs-raps/>. To read a local copy, open it through a web server:
 
 ```bash
 python3 -m http.server 8000
