@@ -114,11 +114,6 @@ fi
 # The BenchmarkTimer callback in configs/base.yaml
 export PYTHONPATH=$root_dir/python${PYTHONPATH:+:$PYTHONPATH}
 
-if [[ $mode == "train" ]]; then
-    # The progress bar writes many lines to out.txt. The profiler needs it, so keep it there.
-    hydra_args=("diagnostics.enable_progress_bar=False" "${hydra_args[@]}")
-fi
-
 export AIFS_GRAPH_DIR=${AIFS_GRAPH_DIR:-$AIFS_OUTPUT_DIR/graphs}
 mkdir -p $AIFS_GRAPH_DIR
 

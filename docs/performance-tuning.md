@@ -34,8 +34,6 @@ The `training_avg_throughput` value of the profiler for the same run was 3.96. T
 | Memory | On, 20 steps, rank 0 only | `diagnostics.benchmark_profiler.memory.enabled=False` | Gives a trace of the GPU memory. The steps that it records are slower. At the end, it uses much host memory to make the summary. |
 | System, snapshot, model summary | Off | `diagnostics.benchmark_profiler.<part>.enabled=True` | Use them only to examine a problem. |
 
-Without `--profile`, `bin/train` disables the progress bar (`diagnostics.enable_progress_bar=False`) to keep `out.txt` small. The profiler needs the progress bar, so `--profile` keeps it.
-
 If a large config stops with a host out-of-memory error after training with `--profile`, decrease `diagnostics.benchmark_profiler.memory.steps` or disable the memory profiler.
 
 ### Memory profiler schedule
