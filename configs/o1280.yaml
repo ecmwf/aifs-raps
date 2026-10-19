@@ -8,12 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 # o1280 (~9km, the resolution of the operational IFS) configuration.
-# Transformer processor on an o96 hidden grid.
+# Graph transformer processor on a refinement-level 6 icosahedral hidden mesh.
 
 defaults:
   - data: zarr_no_insolation
-  - model: transformer
-  - graph: encoder_decoder_only
+  - model: graphtransformer
+  - graph: multi_scale
   - training: single
   - base # after the groups above, so base.yaml overrides them
   - override hydra/job_logging: none
@@ -26,7 +26,7 @@ system:
   input:
     # Synthetic data. For real data: bin/train --dataset=aifs-od-an-oper-0001-mars-o1280-2016-2023-6h-v1.zarr
     dataset: synthetic:o1280
-    graph: ${oc.env:AIFS_GRAPH_DIR}/o1280_encoder_decoder_only_o96.graph
+    graph: ${oc.env:AIFS_GRAPH_DIR}/o1280_multi_scale_l6.graph
 
 data:
   resolution: o1280
@@ -35,7 +35,7 @@ graph:
   nodes:
     hidden:
       node_builder:
-        grid: o96
+        resolution: 6
 
 model:
   keep_batch_sharded: True
