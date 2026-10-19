@@ -7,12 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# n320 (~31km) configuration. Transformer processor on an o96 hidden grid.
+# n320 (~31km) configuration. Graph transformer processor on a refinement-level 6
+# icosahedral hidden mesh.
 
 defaults:
   - data: zarr
-  - model: transformer
-  - graph: encoder_decoder_only
+  - model: graphtransformer
+  - graph: multi_scale
   - training: single
   - base # after the groups above, so base.yaml overrides them
   - override hydra/job_logging: none
@@ -23,7 +24,7 @@ system:
   input:
     # Real data. Synthetic datasets support only octahedral (oNNN) grids.
     dataset: ${oc.env:AIFS_DATA_DIR}/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
-    graph: ${oc.env:AIFS_GRAPH_DIR}/n320_encoder_decoder_only_o96.graph
+    graph: ${oc.env:AIFS_GRAPH_DIR}/n320_multi_scale_l6.graph
 
 data:
   resolution: n320
@@ -32,7 +33,7 @@ graph:
   nodes:
     hidden:
       node_builder:
-        grid: o96
+        resolution: 6
 
 model:
   num_channels: 1024

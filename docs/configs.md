@@ -15,10 +15,10 @@ The configs are in `configs/`. They are [Hydra](https://hydra.cc) configs for an
 | Config | Grid | Processor | Hidden grid | GPUs for each model | Default input | Real dataset |
 | --- | --- | --- | --- | --- | --- | --- |
 | `o96` | O96 (about 100 km) | Graph transformer | Refinement level 5 | 1 | Synthetic | `aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr` |
-| `n320` | N320 (about 31 km) | Transformer | O96 | 1 | Real | `aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr` |
+| `n320` | N320 (about 31 km) | Graph transformer | Refinement level 6 | 1 | Real | `aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr` |
 | `o800` | O800 (about 12 km) | Graph transformer | Refinement level 7 | 1 | Synthetic | `aifs-benchmarking-ea-an-oper-0001-mars-o800-2023-2023-6h-v1.zarr` |
-| `o1280` | O1280 (about 9 km) | Transformer | O96 | 2 | Synthetic | `aifs-od-an-oper-0001-mars-o1280-2016-2023-6h-v1.zarr` |
-| `o2560` | O2560 (about 4.4 km) | Transformer | O256 | 4 | Synthetic | `aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v1-1month.zarr` |
+| `o1280` | O1280 (about 9 km) | Graph transformer | Refinement level 6 | 2 | Synthetic | `aifs-od-an-oper-0001-mars-o1280-2016-2023-6h-v1.zarr` |
+| `o2560` | O2560 (about 4.4 km) | Graph transformer | Refinement level 7 | 4 | Synthetic | `aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v1-1month.zarr` |
 
 ## Input data
 

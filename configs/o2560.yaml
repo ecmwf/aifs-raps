@@ -7,13 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# o2560 (~4.4km) configuration. Transformer processor on an o256 hidden grid.
-# This needs the model to be sharded over several GPUs.
+# o2560 (~4.4km) configuration. Graph transformer processor on a refinement-level 7
+# icosahedral hidden mesh. This needs the model to be sharded over several GPUs.
 
 defaults:
   - data: zarr_no_insolation
-  - model: transformer
-  - graph: encoder_decoder_only
+  - model: graphtransformer
+  - graph: multi_scale
   - training: single
   - base # after the groups above, so base.yaml overrides them
   - override hydra/job_logging: none
@@ -26,7 +26,7 @@ system:
   input:
     # Synthetic data. For real data: bin/train --dataset=aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v1-1month.zarr
     dataset: synthetic:o2560
-    graph: ${oc.env:AIFS_GRAPH_DIR}/o2560_encoder_decoder_only_o256.graph
+    graph: ${oc.env:AIFS_GRAPH_DIR}/o2560_multi_scale_l7.graph
 
 data:
   resolution: o2560
@@ -35,14 +35,13 @@ graph:
   nodes:
     hidden:
       node_builder:
-        grid: o256
+        resolution: 7
 
 model:
   keep_batch_sharded: True
   num_channels: 2048
   processor:
     num_chunks: 16
-    window_size: 2160
   encoders:
     "0":
       mapper:
