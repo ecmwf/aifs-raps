@@ -1,0 +1,70 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# o2560 (~4.4km) configuration. Transformer processor on an o256 hidden grid.
+# This needs the model to be sharded over several GPUs.
+
+defaults:
+  - data: zarr_no_insolation
+  - model: transformer
+  - graph: encoder_decoder_only
+  - training: single
+  - base # after the groups above, so base.yaml overrides them
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
+
+system:
+  hardware:
+    num_gpus_per_model: 4
+  input:
+    # Synthetic data. For real data: bin/train --dataset=aifs-rd-an-lwda-ifc3-mars-o2560-2023-2023-6h-v1-1month.zarr
+    dataset: synthetic:o2560
+    graph: ${oc.env:AIFS_GRAPH_DIR}/o2560_encoder_decoder_only_o256.graph
+
+data:
+  resolution: o2560
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        grid: o256
+
+model:
+  keep_batch_sharded: True
+  num_channels: 2048
+  processor:
+    num_chunks: 16
+    window_size: 2160
+  encoders:
+    "0":
+      mapper:
+        shard_strategy: edges
+        num_chunks: 16
+  decoders:
+    "0":
+      mapper:
+        shard_strategy: edges
+        num_chunks: 16
+
+dataloader:
+  num_workers:
+    training: 6
+    validation: 6
+  training:
+    datasets:
+      data:
+        start: 2023-09-01
+        end: 2023-09-28
+  validation:
+    datasets:
+      data:
+        start: 2023-09-28
+        end: 2023-09-29

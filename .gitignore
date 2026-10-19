@@ -1,4 +1,3 @@
-.aifsenv
 *ecsbatch*
 *.out
-build*
+__pycache__/

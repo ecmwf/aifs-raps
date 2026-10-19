@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIFS-RAPS</title>
+<!--
+  HTML viewer for the AIFS-RAPS documentation.
+  The Markdown files (../README.md and docs/*.md) are the only source of the text.
+  This page loads them and renders them. Open it through a web server, for example:
+    python3 -m http.server --directory <repo> 8000   ->   http://localhost:8000/docs/
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+/* Layout: a sidebar with the documents and the sections of the open document, and one reading column (~68ch). */
+:root {
+  --bg: #f6f8f9;
+  --surface: #ffffff;
+  --fg: #16232b;
+  --muted: #566871;
+  --line: #d6dfe3;
+  --accent: #0b6e7f;
+  --accent-soft: #e2f0f2;
+  --warn: #9a5a00;
+  --warn-soft: #fbf1e1;
+  --code-bg: #eef3f5;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f171b; --surface: #152127; --fg: #dde7eb; --muted: #93a6ae; --line: #26363d;
+    --accent: #5cc4d4; --accent-soft: #15333a; --warn: #e8b465; --warn-soft: #2e2415; --code-bg: #1a2a31;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f171b; --surface: #152127; --fg: #dde7eb; --muted: #93a6ae; --line: #26363d;
+  --accent: #5cc4d4; --accent-soft: #15333a; --warn: #e8b465; --warn-soft: #2e2415; --code-bg: #1a2a31;
+  color-scheme: dark;
+}
+
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 var(--font-body); }
+.layout { max-width: 68rem; margin: 0 auto; padding: 0 1.25rem; padding-block: 2rem 4rem; display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 3rem; }
+@media (max-width: 52rem) { .layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; } }
+
+/* sidebar */
+nav { position: sticky; top: 1.5rem; align-self: start; display: grid; gap: 1.25rem; }
+@media (max-width: 52rem) { nav { position: static; } }
+.brand { font: 600 1.6rem/1 var(--font-display); color: var(--fg); text-decoration: none; }
+.brand small { display: block; font: 500 .68rem/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-top: .4rem; }
+.docs { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+.docs > li > a { display: block; padding: .35rem .6rem; border-radius: 4px; color: var(--fg); text-decoration: none; font-weight: 500; font-size: .95rem; }
+.docs > li > a:hover { background: var(--accent-soft); }
+.docs > li > a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.toc { list-style: none; margin: .2rem 0 .5rem .6rem; padding: 0 0 0 .7rem; border-left: 1px solid var(--line); display: grid; gap: .1rem; }
+.toc a { display: block; padding: .15rem 0; font-size: .85rem; color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--accent); }
+@media (max-width: 52rem) {
+  .docs { display: flex; flex-wrap: wrap; gap: .35rem; }
+  .docs > li > a { border: 1px solid var(--line); background: var(--surface); }
+  .toc { display: none; }
+}
+
+/* rendered markdown */
+main { min-width: 0; max-width: 46rem; }
+main h1 { font: 600 clamp(2.2rem, 6vw, 3rem)/1.05 var(--font-display); letter-spacing: -.01em; margin: 0 0 1.25rem; text-wrap: balance; }
+main h2 { font: 600 1.5rem/1.2 var(--font-display); margin: 2.5rem 0 .75rem; padding-top: 1.25rem; border-top: 1px solid var(--line); text-wrap: balance; }
+main h3 { font: 600 1.1rem/1.3 var(--font-body); margin: 1.75rem 0 .5rem; }
+main h1 + p { font-size: 1.12rem; color: var(--muted); }
+main p, main ul, main ol { margin: 0 0 .9rem; }
+main ul, main ol { padding-left: 1.3rem; }
+main li { margin: .25rem 0; }
+main li > p { margin: 0 0 .5rem; }
+main a { color: var(--accent); text-underline-offset: 2px; }
+main strong { font-weight: 600; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:not(pre) > code { font: .88em var(--font-mono); background: var(--code-bg); padding: .1em .35em; border-radius: 3px; }
+
+.code { position: relative; background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; margin: 0 0 1rem; }
+.code pre { margin: 0; padding: .8rem 1rem; overflow-x: auto; font: .86rem/1.6 var(--font-mono); }
+.copy { position: absolute; top: .4rem; right: .4rem; font: 500 .72rem/1 var(--font-body); color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: .35rem .5rem; cursor: pointer; }
+.copy:hover { color: var(--accent); border-color: var(--accent); }
+
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); margin: 0 0 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+th, td { text-align: left; padding: .6rem .85rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 .72rem/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--code-bg); }
+td:first-child code { white-space: nowrap; }
+td { font-variant-numeric: tabular-nums; }
+
+.notice { border: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--warn-soft); padding: .9rem 1.1rem; border-radius: 0 4px 4px 0; margin: 0 0 1rem; font-size: .95rem; }
+.notice > :last-child { margin-bottom: 0; }
+.notice .tag { display: block; font: 600 .72rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--warn); margin-bottom: .5rem; }
+blockquote { margin: 0 0 1rem; padding: .2rem 1rem; border-left: 3px solid var(--line); color: var(--muted); }
+
+.status { color: var(--muted); }
+.status pre { white-space: pre-wrap; }
+footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav aria-label="Documentation">
+    <a class="brand" href="#readme">AIFS-RAPS<small>Benchmark documentation</small></a>
+    <ul class="docs" id="docs"></ul>
+  </nav>
+  <main id="content"><p class="status">Loading…</p></main>
+</div>
+
+<script>
+// The documents to show, in order. Paths are relative to this file.
+var DOCS = [
+  { id: "readme",      title: "Overview",    path: "../README.md" },
+  { id: "environment", title: "Environment", path: "environment.md" },
+  { id: "running",     title: "Running",     path: "running.md" },
+  { id: "configs",     title: "Configs",     path: "configs.md" },
+  { id: "results",     title: "Results",     path: "results.md" },
+  { id: "inference",   title: "Inference",   path: "inference.md" },
+  { id: "performance-tuning", title: "Performance tuning", path: "performance-tuning.md" },
+  { id: "parallelism", title: "Parallelism", path: "parallelism.md" },
+  { id: "precision",   title: "Precision",   path: "precision.md" },
+  { id: "containers",  title: "Containers",  path: "containers.md" },
+];
+
+var content = document.getElementById("content");
+var docsNav = document.getElementById("docs");
+var cache = {};
+
+function docForHref(href) {
+  // README.md, ../README.md, docs/x.md and x.md all map to a document id
+  var m = /(?:^|\/)([\w-]+)\.md(#.*)?$/.exec(href);
+  if (!m) return null;
+  var name = m[1].toLowerCase();
+  return DOCS.some(function (d) { return d.id === name; }) ? name : null;
+}
+
+function slug(text) {
+  return text.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
+}
+
+function enhance(root, doc) {
+  // Links to other docs open in this page. Links to other repo files resolve from the Markdown file.
+  root.querySelectorAll("a[href]").forEach(function (a) {
+    var href = a.getAttribute("href");
+    if (/^[a-z]+:/i.test(href) || href.charAt(0) === "#") return;
+    var id = docForHref(href);
+    if (id) { a.setAttribute("href", "#" + id); return; }
+    a.setAttribute("href", new URL(href, new URL(doc.path, location.href)).href);
+  });
+
+  // GitHub alerts: "> [!IMPORTANT]" and the DISCLAIMER paragraph
+  root.querySelectorAll("blockquote").forEach(function (bq) {
+    var first = bq.querySelector("p");
+    var m = first && /^\s*\[!(\w+)\]\s*/.exec(first.innerHTML);
+    if (!m) return;
+    first.innerHTML = first.innerHTML.slice(m[0].length);
+    var div = document.createElement("div");
+    div.className = "notice";
+    div.innerHTML = '<span class="tag">' + m[1] + "</span>" + bq.innerHTML;
+    bq.replaceWith(div);
+  });
+  root.querySelectorAll("p").forEach(function (p) {
+    if (/^DISCLAIMER\b/.test(p.textContent)) {
+      var prev = p.previousElementSibling;
+      if (prev && prev.classList.contains("notice")) { prev.appendChild(p); }
+      else { p.classList.add("notice"); }
+    }
+  });
+
+  // Tables scroll on narrow screens
+  root.querySelectorAll("table").forEach(function (t) {
+    var wrap = document.createElement("div");
+    wrap.className = "table-scroll";
+    t.replaceWith(wrap);
+    wrap.appendChild(t);
+  });
+
+  // Code blocks get a copy button
+  root.querySelectorAll("pre").forEach(function (pre) {
+    var wrap = document.createElement("div");
+    wrap.className = "code";
+    pre.replaceWith(wrap);
+    wrap.appendChild(pre);
+    var btn = document.createElement("button");
+    btn.className = "copy";
+    btn.type = "button";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", function () {
+      var code = pre.querySelector("code") || pre;
+      var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+      var select = function () { var r = document.createRange(); r.selectNodeContents(code); var s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+      try { navigator.clipboard.writeText(code.textContent).then(done, select); } catch (e) { select(); }
+    });
+    wrap.appendChild(btn);
+  });
+
+  // Section ids for the sidebar
+  var sections = [];
+  root.querySelectorAll("h2").forEach(function (h) {
+    h.id = doc.id + "-" + slug(h.textContent);
+    sections.push({ id: h.id, text: h.textContent });
+  });
+  return sections;
+}
+
+function renderNav(current, sections) {
+  docsNav.innerHTML = "";
+  DOCS.forEach(function (d) {
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.href = "#" + d.id;
+    a.textContent = d.title;
+    if (d.id === current) a.setAttribute("aria-current", "page");
+    li.appendChild(a);
+    if (d.id === current && sections.length) {
+      var ul = document.createElement("ul");
+      ul.className = "toc";
+      sections.forEach(function (s) {
+        var sli = document.createElement("li");
+        var sa = document.createElement("a");
+        sa.href = "#" + d.id;
+        sa.textContent = s.text;
+        sa.addEventListener("click", function (e) {
+          e.preventDefault();
+          document.getElementById(s.id).scrollIntoView({ behavior: "smooth" });
+        });
+        sli.appendChild(sa);
+        ul.appendChild(sli);
+      });
+      li.appendChild(ul);
+    }
+    docsNav.appendChild(li);
+  });
+}
+
+function load(text, doc) {
+  // Text between <!-- not-in-html --> and <!-- /not-in-html --> is only for readers of the Markdown file
+  text = text.replace(/<!-- not-in-html -->[\s\S]*?<!-- \/not-in-html -->\n?/g, "");
+  content.innerHTML = marked.parse(text);
+  var sections = enhance(content, doc);
+  var footer = document.createElement("footer");
+  footer.innerHTML = "Source: <a href=\"" + doc.path + "\"><code>" + doc.path.replace("../", "") + "</code></a>";
+  content.appendChild(footer);
+  renderNav(doc.id, sections);
+  document.title = doc.id === "readme" ? "AIFS-RAPS" : doc.title + " · AIFS-RAPS";
+}
+
+function show() {
+  var id = location.hash.slice(1) || "readme";
+  var doc = DOCS.filter(function (d) { return d.id === id; })[0] || DOCS[0];
+  if (cache[doc.id]) { load(cache[doc.id], doc); window.scrollTo(0, 0); return; }
+  content.innerHTML = '<p class="status">Loading…</p>';
+  fetch(doc.path)
+    .then(function (r) { if (!r.ok) throw new Error(r.status + " " + r.statusText); return r.text(); })
+    .then(function (text) { cache[doc.id] = text; load(text, doc); window.scrollTo(0, 0); })
+    .catch(function (err) {
+      renderNav(doc.id, []);
+      content.innerHTML =
+        "<h1>Cannot load " + doc.path + "</h1>" +
+        '<div class="status"><p>This page reads the Markdown files with the browser. Most browsers do not let a page read files when you open it from disk (<code>file://</code>).</p>' +
+        "<p>Start a web server in the repository and open the page through it:</p>" +
+        "<pre><code>python3 -m http.server --directory /path/to/aifs-raps 8000\n# then open http://localhost:8000/docs/</code></pre>" +
+        "<p>Error: " + String(err.message || err) + "</p></div>";
+    });
+}
+
+if (typeof marked === "undefined") {
+  content.innerHTML = '<p class="status">Cannot load the Markdown renderer (marked) from cdn.jsdelivr.net. Read the Markdown files in <code>docs/</code> directly.</p>';
+} else {
+  window.addEventListener("hashchange", show);
+  show();
+}
+</script>
+</body>
+</html>

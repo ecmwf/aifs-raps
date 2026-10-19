@@ -1,0 +1,64 @@
+# (C) Copyright 2025- ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# o800 (~12km) configuration. Graph transformer processor on a refinement-level 7
+# icosahedral hidden mesh.
+
+defaults:
+  - data: zarr
+  - model: graphtransformer
+  - graph: multi_scale
+  - training: single
+  - base # after the groups above, so base.yaml overrides them
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
+
+system:
+  input:
+    # Synthetic data. For real data: bin/train --dataset=aifs-benchmarking-ea-an-oper-0001-mars-o800-2023-2023-6h-v1.zarr
+    dataset: synthetic:o800
+    graph: ${oc.env:AIFS_GRAPH_DIR}/o800_multi_scale_l7.graph
+
+data:
+  resolution: o800
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 7
+
+model:
+  keep_batch_sharded: True
+  num_channels: 1024
+  processor:
+    num_chunks: 16
+  encoders:
+    "0":
+      mapper:
+        shard_strategy: edges
+        num_chunks: 4
+  decoders:
+    "0":
+      mapper:
+        shard_strategy: edges
+        num_chunks: 4
+
+dataloader:
+  training:
+    datasets:
+      data:
+        start: 2023-01-01
+        end: 2023-12-20
+  validation:
+    datasets:
+      data:
+        start: 2023-12-21
+        end: 2023-12-31
